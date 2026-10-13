@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ArrowDown from './assets/arrow-down.svg'
 import HeaderVector from './assets/header-vector.svg'
 import UserVector from './assets/user-vector.svg'
-import WarningCircle from './assets/warning-circle.svg'
 import CheckGroup from './assets/check-group.svg'
 import Info from './assets/info.svg'
 
@@ -33,8 +32,8 @@ export default function App() {
   const [reason, setReason] = useState<Reason>('Transfer')
   const [description, setDescription] = useState<string>('Transfer')
   const [submitted, setSubmitted] = useState<boolean>(false)
-  const [shakePill, setShakePill] = useState<number>(0)
-  const [showWarningIcon, setShowWarningIcon] = useState<boolean>(false)
+  const [shakeAmount, setShakeAmount] = useState<number>(0)
+  const prevOverBalanceRef = useRef<boolean>(false)
 
   const numericAmount = useMemo(() => {
     const n = parseFloat(amount.replace(/,/g, ''))
@@ -45,22 +44,17 @@ export default function App() {
   const canSubmit = numericAmount > 0 && !overBalance
 
   useEffect(() => {
-    if (!overBalance) setShowWarningIcon(false)
+    const wasOver = prevOverBalanceRef.current
+    prevOverBalanceRef.current = overBalance
+    if (overBalance && !wasOver) {
+      setShakeAmount((n) => n + 1)
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate([35, 40, 35, 40, 35])
+      }
+    }
   }, [overBalance])
 
-  const triggerLowBalanceFeedback = () => {
-    setShowWarningIcon(true)
-    setShakePill((n) => n + 1)
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      navigator.vibrate([35, 40, 35, 40, 35])
-    }
-  }
-
   const handleConfirm = () => {
-    if (overBalance) {
-      triggerLowBalanceFeedback()
-      return
-    }
     if (!canSubmit) return
     setSubmitted(true)
   }
@@ -124,32 +118,31 @@ export default function App() {
           {/* Amount Card */}
           <section className="bg-white rounded-[12px] pt-[14px] pb-5 px-7 flex flex-col items-center">
             <div className="w-full flex flex-col items-center gap-[23px]">
-              <div className="flex flex-col items-center gap-4 w-[148px]">
+              <div className="flex flex-col items-center gap-4">
                 <div
-                  key={shakePill}
-                  className={`flex gap-[6px] items-center px-2 py-1 rounded-[4px] transition-colors ${
-                    showWarningIcon ? 'bg-[#FEF5F1]' : 'bg-[#FFC700]/10'
-                  } ${shakePill > 0 ? 'animate-balance-shake' : ''}`}
-                  style={{ transformOrigin: 'center' }}
+                  className="flex items-center px-2 py-1 rounded-[4px] bg-[#FFC700]/10"
                   aria-live="polite"
                 >
                   <span className="font-manrope font-medium text-[11px] leading-[1.415] whitespace-nowrap text-parkway-tangerine08">
                     Wallet Balance: ₦{WALLET_BALANCE.toLocaleString('en-NG')}
                   </span>
-                  {showWarningIcon && (
-                    <img
-                      src={WarningCircle}
-                      alt=""
-                      className="size-[14px] animate-warning-pop"
-                    />
-                  )}
                 </div>
-                <div className="flex flex-col items-center gap-2 w-full relative">
+                <div
+                  key={shakeAmount}
+                  className={`flex flex-col items-center gap-2 w-full relative ${
+                    shakeAmount > 0 ? 'animate-amount-shake' : ''
+                  }`}
+                  style={{ transformOrigin: 'center' }}
+                >
                   <p className="font-manrope font-medium text-[11px] text-[#979797] text-center tracking-[-0.11px]">
                     Amount to send
                   </p>
                   <div className="relative flex items-end justify-center">
-                    <span className="font-manrope font-bold text-[16px] text-[#979797] tracking-[-0.48px] self-center pr-1">
+                    <span
+                      className={`font-manrope font-bold text-[16px] tracking-[-0.48px] self-center pr-1 transition-colors ${
+                        overBalance ? 'text-[#D94141]/70' : 'text-[#979797]'
+                      }`}
+                    >
                       ₦
                     </span>
                     <input
@@ -167,11 +160,23 @@ export default function App() {
                         }
                       }}
                       aria-label="Amount to send"
-                      className="font-display font-semibold text-[30px] text-parkway-grey09 tracking-[-1.2px] bg-transparent outline-none text-center w-[150px] caret-parkway-tangerine01"
+                      aria-invalid={overBalance}
+                      aria-describedby={overBalance ? 'amount-error' : undefined}
+                      className={`font-display font-semibold text-[30px] tracking-[-1.2px] bg-transparent outline-none text-center w-[150px] caret-parkway-tangerine01 transition-colors ${
+                        overBalance ? 'text-[#D94141]' : 'text-parkway-grey09'
+                      }`}
                       style={{ fontVariantNumeric: 'tabular-nums' }}
                       placeholder="0.00"
                     />
                   </div>
+                  {overBalance && (
+                    <p
+                      id="amount-error"
+                      className="font-manrope font-medium text-[11px] text-[#D94141] text-center tracking-[-0.11px] whitespace-nowrap animate-error-fade-in"
+                    >
+                      Amount entered exceeds balance
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="w-full h-px bg-[#EFEFEF]" />
@@ -309,28 +314,26 @@ export default function App() {
           0% { transform: scale(.9); opacity: 0 }
           100% { transform: scale(1); opacity: 1 }
         }
-        @keyframes balanceShake {
-          0%   { transform: translate3d(0,0,0) scale(1); }
-          10%  { transform: translate3d(-6px,0,0) scale(1.03); }
-          25%  { transform: translate3d(5px,0,0) scale(1.04); }
-          40%  { transform: translate3d(-4px,0,0) scale(1.03); }
-          55%  { transform: translate3d(3px,0,0) scale(1.02); }
-          70%  { transform: translate3d(-2px,0,0) scale(1.01); }
-          85%  { transform: translate3d(1px,0,0) scale(1.005); }
-          100% { transform: translate3d(0,0,0) scale(1); }
+        @keyframes amountShake {
+          0%   { transform: translate3d(0,0,0); }
+          10%  { transform: translate3d(-8px,0,0); }
+          25%  { transform: translate3d(7px,0,0); }
+          40%  { transform: translate3d(-6px,0,0); }
+          55%  { transform: translate3d(4px,0,0); }
+          70%  { transform: translate3d(-3px,0,0); }
+          85%  { transform: translate3d(2px,0,0); }
+          100% { transform: translate3d(0,0,0); }
         }
-        .animate-balance-shake {
-          animation: balanceShake 520ms cubic-bezier(.36,.07,.19,.97) both;
+        .animate-amount-shake {
+          animation: amountShake 520ms cubic-bezier(.36,.07,.19,.97) both;
           will-change: transform;
         }
-        @keyframes warningPop {
-          0%   { transform: scale(0.4); opacity: 0; }
-          55%  { transform: scale(1.25); opacity: 1; filter: drop-shadow(0 0 6px rgba(252,85,85,0.55)); }
-          100% { transform: scale(1); opacity: 1; filter: none; }
+        @keyframes errorFadeIn {
+          0%   { opacity: 0; transform: translateY(-4px); }
+          100% { opacity: 1; transform: translateY(0); }
         }
-        .animate-warning-pop {
-          animation: warningPop 420ms cubic-bezier(.2,.9,.3,1.2) both;
-          transform-origin: center;
+        .animate-error-fade-in {
+          animation: errorFadeIn 220ms ease-out both;
         }
       `}</style>
     </div>
