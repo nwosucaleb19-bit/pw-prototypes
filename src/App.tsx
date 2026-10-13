@@ -26,6 +26,17 @@ function formatLimit(value: number) {
   })
 }
 
+function CheckCorner() {
+  return (
+    <img
+      src={CheckGroup}
+      alt=""
+      aria-hidden
+      className="pointer-events-none absolute top-0 right-0 h-[20.8px] w-[28.5px]"
+    />
+  )
+}
+
 export default function App() {
   const [amount, setAmount] = useState<string>('5000')
   const [amountFocused, setAmountFocused] = useState<boolean>(false)
@@ -186,13 +197,14 @@ export default function App() {
                       key={p}
                       type="button"
                       onClick={() => setAmount(String(p))}
-                      className={`h-[33px] rounded-[10px] border font-manrope font-bold text-[12px] tracking-[-0.12px] transition-all active:scale-[0.97] ${
+                      className={`relative h-[33px] rounded-[10px] border font-manrope font-bold text-[12px] tracking-[-0.12px] overflow-hidden transition-all active:scale-[0.97] ${
                         selected
-                          ? 'border-parkway-tangerine01/60 bg-[#F9956B]/10 text-parkway-tangerine08'
+                          ? 'border-parkway-tangerine01/40 bg-[#F9956B]/10 text-[#464646]'
                           : 'border-[#9797974D] bg-white text-[#464646] hover:border-parkway-tangerine01/60'
                       }`}
                     >
                       ₦{p.toLocaleString('en-NG')}
+                      {selected && <CheckCorner />}
                     </button>
                   )
                 })}
@@ -226,21 +238,14 @@ export default function App() {
                       setReason(r)
                       setDescription(r)
                     }}
-                    className={`relative flex-1 h-[33px] rounded-[10px] border font-manrope text-[12px] tracking-[-0.12px] overflow-hidden transition-all active:scale-[0.97] ${
+                    className={`relative flex-1 h-[33px] rounded-[10px] border font-manrope font-medium text-[12px] tracking-[-0.12px] overflow-hidden transition-all active:scale-[0.97] ${
                       selected
-                        ? 'border-parkway-tangerine01/40 bg-[#F9956B]/10 text-[#464646] font-medium'
-                        : 'border-[#9797974D] bg-white text-[#464646] font-medium hover:border-parkway-tangerine01/60'
+                        ? 'border-parkway-tangerine01/40 bg-[#F9956B]/10 text-[#464646]'
+                        : 'border-[#9797974D] bg-white text-[#464646] hover:border-parkway-tangerine01/60'
                     }`}
                   >
                     {r}
-                    {selected && (
-                      <img
-                        src={CheckGroup}
-                        alt=""
-                        aria-hidden
-                        className="pointer-events-none absolute right-0 top-0 h-[21px] w-[28px]"
-                      />
-                    )}
+                    {selected && <CheckCorner />}
                   </button>
                 )
               })}
