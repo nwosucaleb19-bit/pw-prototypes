@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ArrowDown from './assets/arrow-down.svg'
 import HeaderVector from './assets/header-vector.svg'
 import UserVector from './assets/user-vector.svg'
@@ -34,6 +34,7 @@ export default function App() {
   const [description, setDescription] = useState<string>('Transfer')
   const [submitted, setSubmitted] = useState<boolean>(false)
   const [shakePill, setShakePill] = useState<number>(0)
+  const [showWarningIcon, setShowWarningIcon] = useState<boolean>(false)
 
   const numericAmount = useMemo(() => {
     const n = parseFloat(amount.replace(/,/g, ''))
@@ -43,7 +44,12 @@ export default function App() {
   const overBalance = numericAmount > WALLET_BALANCE
   const canSubmit = numericAmount > 0 && !overBalance
 
+  useEffect(() => {
+    if (!overBalance) setShowWarningIcon(false)
+  }, [overBalance])
+
   const triggerLowBalanceFeedback = () => {
+    setShowWarningIcon(true)
     setShakePill((n) => n + 1)
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       navigator.vibrate([35, 40, 35, 40, 35])
@@ -122,7 +128,7 @@ export default function App() {
                 <div
                   key={shakePill}
                   className={`flex gap-[6px] items-center px-2 py-1 rounded-[4px] transition-colors ${
-                    overBalance ? 'bg-[#FEF5F1]' : 'bg-[#FFC700]/10'
+                    showWarningIcon ? 'bg-[#FEF5F1]' : 'bg-[#FFC700]/10'
                   } ${shakePill > 0 ? 'animate-balance-shake' : ''}`}
                   style={{ transformOrigin: 'center' }}
                   aria-live="polite"
@@ -130,11 +136,13 @@ export default function App() {
                   <span className="font-manrope font-medium text-[11px] leading-[1.415] whitespace-nowrap text-parkway-tangerine08">
                     Wallet Balance: ₦{WALLET_BALANCE.toLocaleString('en-NG')}
                   </span>
-                  <img
-                    src={WarningCircle}
-                    alt=""
-                    className={`size-[14px] ${shakePill > 0 ? 'animate-warning-pulse' : ''}`}
-                  />
+                  {showWarningIcon && (
+                    <img
+                      src={WarningCircle}
+                      alt=""
+                      className="size-[14px] animate-warning-pop"
+                    />
+                  )}
                 </div>
                 <div className="flex flex-col items-center gap-2 w-full relative">
                   <p className="font-manrope font-medium text-[11px] text-[#979797] text-center tracking-[-0.11px]">
@@ -315,12 +323,14 @@ export default function App() {
           animation: balanceShake 520ms cubic-bezier(.36,.07,.19,.97) both;
           will-change: transform;
         }
-        @keyframes warningPulse {
-          0%, 100% { transform: scale(1); filter: none; }
-          40%      { transform: scale(1.35); filter: drop-shadow(0 0 6px rgba(252,85,85,0.55)); }
+        @keyframes warningPop {
+          0%   { transform: scale(0.4); opacity: 0; }
+          55%  { transform: scale(1.25); opacity: 1; filter: drop-shadow(0 0 6px rgba(252,85,85,0.55)); }
+          100% { transform: scale(1); opacity: 1; filter: none; }
         }
-        .animate-warning-pulse {
-          animation: warningPulse 520ms ease-out both;
+        .animate-warning-pop {
+          animation: warningPop 420ms cubic-bezier(.2,.9,.3,1.2) both;
+          transform-origin: center;
         }
       `}</style>
     </div>
