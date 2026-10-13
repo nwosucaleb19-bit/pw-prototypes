@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ArrowDown from './assets/arrow-down.svg'
 import HeaderVector from './assets/header-vector.svg'
 import UserVector from './assets/user-vector.svg'
@@ -33,7 +33,6 @@ export default function App() {
   const [description, setDescription] = useState<string>('Transfer')
   const [submitted, setSubmitted] = useState<boolean>(false)
   const [shakeAmount, setShakeAmount] = useState<number>(0)
-  const prevOverBalanceRef = useRef<boolean>(false)
 
   const numericAmount = useMemo(() => {
     const n = parseFloat(amount.replace(/,/g, ''))
@@ -44,15 +43,12 @@ export default function App() {
   const canSubmit = numericAmount > 0 && !overBalance
 
   useEffect(() => {
-    const wasOver = prevOverBalanceRef.current
-    prevOverBalanceRef.current = overBalance
-    if (overBalance && !wasOver) {
-      setShakeAmount((n) => n + 1)
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-        navigator.vibrate([35, 40, 35, 40, 35])
-      }
+    if (!overBalance) return
+    setShakeAmount((n) => n + 1)
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      navigator.vibrate([35, 40, 35, 40, 35])
     }
-  }, [overBalance])
+  }, [numericAmount, overBalance])
 
   const handleConfirm = () => {
     if (!canSubmit) return
