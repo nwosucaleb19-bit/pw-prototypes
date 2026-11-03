@@ -1,5 +1,6 @@
 import HeaderCurve from '../assets/figma/header-curve.svg'
-import ProfilePic from '../assets/figma/profile-pic.png'
+import ProfilePic from '../assets/figma/avatar-marcus.png'
+import { useState, type ReactNode } from 'react'
 import HelpIcon from '../assets/figma/help-icon.svg'
 import Bell from '../assets/figma/bell.svg'
 import IconLoans from '../assets/figma/action-loans.svg'
@@ -42,6 +43,7 @@ type Txn = {
 }
 
 const TRANSACTIONS: Txn[] = [
+  { name: 'Wallet Funding',  date: 'Today, 9:41 AM',   amount: '500',     direction: 'in',  status: 'Successful' },
   { name: 'Jamie Joe',       date: 'July 22, 9:42 PM', amount: '200,000', direction: 'out', status: 'Successful' },
   { name: 'Kutaje Josep…',   date: 'July 20, 8:10 AM', amount: '200,000', direction: 'in',  status: 'Successful' },
   { name: 'Kutaje Josep…',   date: 'July 20, 8:10 AM', amount: '200,000', direction: 'out', status: 'Failed' },
@@ -84,7 +86,7 @@ export default function Home({ onOpenTransfer }: Props) {
             />
             <div>
               <p className="font-manrope font-bold text-[12px] text-parkway-grey01 tracking-[-0.12px] leading-none">
-                Hi, Jenny
+                Hi, Marcus
               </p>
               <p className="font-manrope text-[12px] text-[#808080] tracking-[-0.12px] mt-[2px] leading-none">
                 Welcome to Parkway Wallet
@@ -112,7 +114,7 @@ export default function Home({ onOpenTransfer }: Props) {
             </div>
             <div className="flex items-center justify-between w-full px-1">
               <h2 className="font-display font-medium text-[26px] text-parkway-grey01 tracking-tightish leading-none">
-                ₦30,000.00
+                ₦500.00
               </h2>
               <div className="flex items-center gap-2">
                 <img src={IconCopy} alt="Copy" className="size-[18px]" />
@@ -144,8 +146,10 @@ export default function Home({ onOpenTransfer }: Props) {
         </div>
       </div>
 
+      <ProfileTasks />
+
       {/* Promo banner carousel */}
-      <div className="pt-4 pb-5">
+      <div className="pt-2 pb-5">
         <div className="flex gap-2 overflow-x-auto hide-scrollbar pl-5 pr-5">
           <div
             className="shrink-0 w-[335px] h-[85px] rounded-[8px] overflow-hidden relative bg-parkway-buff04"
@@ -345,5 +349,107 @@ function AccentShape({ accent }: { accent: 'refer' | 'card' }) {
         <span className="font-manrope text-white/80 text-[8px]">1234</span>
       </div>
     </>
+  )
+}
+
+type Task = { id: string; title: string; sub: string; icon: ReactNode }
+
+const TASKS: Task[] = [
+  { id: 'security', title: 'Set security questions', sub: 'For account recovery', icon: <TaskIcon d="M12 3 5 6v5c0 4.3 3 8.2 7 9.5 4-1.3 7-5.2 7-9.5V6zM10 9.8a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.6M12 15.5h0" /> },
+  { id: 'email', title: 'Add notification email', sub: 'For receipts & alerts', icon: <TaskIcon d="M4 6.5h16v11H4zM4.5 7l7.5 6 7.5-6" /> },
+  { id: 'phone', title: 'Add alternate phone', sub: 'A backup way to reach you', icon: <TaskIcon d="M8 3.5h8a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1zM11 17.5h2" /> },
+  { id: 'tier', title: 'Upgrade to Tier 2', sub: 'Raise your daily limits', icon: <TaskIcon d="M3.5 16.5 9.5 10.5l4 4 7-7M15 7.5h5.5V13" /> },
+]
+
+/**
+ * "Complete your profile": a swipeable row of setup tasks.
+ * Tapping a task ticks it off (its setup screens aren't designed yet);
+ * Hide slides it out of the row.
+ */
+function ProfileTasks() {
+  const [done, setDone] = useState<Set<string>>(new Set())
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const [leaving, setLeaving] = useState<Set<string>>(new Set())
+  const visible = TASKS.filter((t) => !hidden.has(t.id))
+  if (visible.length === 0) return null
+
+  const hide = (id: string) => {
+    setLeaving((s) => new Set(s).add(id))
+    window.setTimeout(() => setHidden((s) => new Set(s).add(id)), 320)
+  }
+  const open = (t: Task) => {
+    if (done.has(t.id)) return
+    setDone((s) => new Set(s).add(t.id))
+  }
+
+  return (
+    <section className="pt-6 pb-4">
+      <div className="px-[14px] flex items-center justify-between">
+        <h3 className="font-manrope font-bold text-[18px] leading-[29px] text-[#313131]">Complete your profile</h3>
+        <span className="font-manrope font-medium text-[14px] text-parkway-grey09 tabular-nums">
+          <span key={done.size} className="inline-block animate-soft-in">{done.size}</span> of {TASKS.length} done
+        </span>
+      </div>
+      <div className="mt-4 flex overflow-x-auto hide-scrollbar snap-x snap-mandatory px-[14px] scroll-px-[14px]">
+        {visible.map((t) => {
+          const isDone = done.has(t.id)
+          const isLeaving = leaving.has(t.id)
+          return (
+            <div
+              key={t.id}
+              className="shrink-0 snap-start overflow-hidden transition-[max-width,opacity,transform,padding] duration-300"
+              style={{
+                maxWidth: isLeaving ? 0 : 256,
+                paddingRight: isLeaving ? 0 : 17,
+                opacity: isLeaving ? 0 : 1,
+                transform: isLeaving ? 'scale(0.92)' : 'none',
+                transitionTimingFunction: 'var(--ease-travel)',
+              }}
+            >
+              <div className="relative w-[239px] h-[66px] rounded-[8px] border border-parkway-grey05 bg-white">
+                <button
+                  type="button"
+                  onClick={() => open(t)}
+                  className="absolute inset-0 flex items-center gap-2.5 pl-4 pr-2.5 text-left active:scale-[0.98] transition-transform"
+                >
+                  <span
+                    className="size-[34px] shrink-0 rounded-full flex items-center justify-center transition-colors duration-300"
+                    style={{ background: isDone ? '#EBFAE5' : '#FEEAE1' }}
+                  >
+                    {isDone ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-label="Done" className="animate-soft-in">
+                        <path d="M5 12.5 10 17.5 19 7" stroke="#44AC21" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    ) : t.icon}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className={`block font-manrope font-semibold text-[13px] tracking-[-0.01em] leading-5 truncate ${isDone ? 'text-parkway-grey02 line-through decoration-parkway-grey03' : 'text-parkway-grey01'}`}>{t.title}</span>
+                    <span className="block mt-0.5 font-manrope font-medium text-[12px] leading-4 text-parkway-grey02 truncate">{isDone ? 'Done' : t.sub}</span>
+                  </span>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0">
+                    <path d="M9 6l6 6-6 6" stroke="#121212" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => hide(t.id)}
+                  className="absolute right-[14px] top-[3px] px-1 font-manrope font-medium text-[8px] text-parkway-tangerine01 active:opacity-60"
+                >
+                  Hide
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function TaskIcon({ d }: { d: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d={d} stroke="#F9956B" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
 }

@@ -20,6 +20,18 @@ import Success, {
 } from './screens/Success'
 import { INVOICES, type Invoice } from './data/invoices'
 import type { Outcome } from './components/OutcomeMark'
+import Welcome from './screens/onboarding/Welcome'
+import PhoneNumber from './screens/onboarding/PhoneNumber'
+import VerifyOtp, { OTP_REJECT } from './screens/onboarding/VerifyOtp'
+import IdentityChoice, { type IdMethod } from './screens/onboarding/IdentityChoice'
+import IdentityVerification, { DEMO_IDENTITY, ID_NOT_FOUND_PREFIX, type IdentityRecord } from './screens/onboarding/IdentityVerification'
+import AddressDetails, { type Address } from './screens/onboarding/AddressDetails'
+import ResumeSignup from './screens/onboarding/ResumeSignup'
+import { OnboardingProgressContext } from './onboarding/StepList'
+import { SimulationContext, type Simulation } from './onboarding/network'
+import FaceVerification from './screens/onboarding/FaceVerification'
+import CreatePassword from './screens/onboarding/CreatePassword'
+import SetPin from './screens/onboarding/SetPin'
 
 type Screen =
   | 'home' | 'transfer'
@@ -27,6 +39,74 @@ type Screen =
   | 'send' | 'pin' | 'invoicePin'
   | 'successMonitor' | 'recentsBeneficiaries'
   | 'success'
+  // Onboarding
+  | 'welcome' | 'obPhone' | 'obOtp' | 'obIdChoice' | 'obIdVerify' | 'obAddress' | 'obFace' | 'obPassword' | 'obPin' | 'obPinConfirm' | 'obResume'
+
+/** Chrome colours around the screen (status bar + home indicator) per screen. */
+const CHROME: Partial<Record<Screen, { top: string; bottom: string; dark?: boolean }>> = {
+  welcome: { top: '#F4F4F4', bottom: '#FFFFFF' },
+  obResume: { top: '#FFFFFF', bottom: '#FAFAFA' },
+  obFace: { top: '#525252', bottom: '#525252', dark: true },
+  home: { top: '#FAFAFA', bottom: '#FFFFFF' },
+}
+const DEFAULT_CHROME = { top: '#FAFAFA', bottom: '#FAFAFA', dark: false }
+
+const ONBOARDING_ORDER: { screen: Screen; label: string }[] = [
+  { screen: 'welcome', label: 'Welcome' },
+  { screen: 'obPhone', label: '1 · Phone number' },
+  { screen: 'obOtp', label: '1 · Verify code' },
+  { screen: 'obIdChoice', label: '2 · Choose BVN / NIN' },
+  { screen: 'obIdVerify', label: '2 · BVN verification' },
+  { screen: 'obAddress', label: '3 · Address + details sheet' },
+  { screen: 'obFace', label: '4 · Face verification' },
+  { screen: 'obPassword', label: '5 · Create password' },
+  { screen: 'obPin', label: '6 · Set PIN' },
+  { screen: 'obPinConfirm', label: '6 · Confirm PIN' },
+]
+
+const DEMO_PHONE = '08123456698'
+
+/** Which onboarding step each screen belongs to. */
+const STEP_OF: Partial<Record<Screen, number>> = {
+  obPhone: 1, obOtp: 1, obIdChoice: 2, obIdVerify: 2, obAddress: 3, obFace: 4, obPassword: 5, obPin: 6, obPinConfirm: 6,
+}
+/** Where "Continue to …" lands for each step. */
+const STEP_ENTRY: Record<number, Screen> = { 1: 'obPhone', 2: 'obIdChoice', 3: 'obAddress', 4: 'obFace', 5: 'obPassword', 6: 'obPin' }
+
+/** Onboarding progress kept on the device so a returning user can resume. */
+type Progress = { step: number; phone: string; idMethod: IdMethod; idRecord: IdentityRecord; address: Address | null }
+const PROGRESS_KEY = 'pw.onboardingProgress'
+
+function loadProgress(): Progress | null {
+  try {
+    const raw = window.localStorage.getItem(PROGRESS_KEY)
+    const p = raw ? (JSON.parse(raw) as Progress) : null
+    return p && p.step >= 1 && p.step <= 6 ? p : null
+  } catch {
+    return null
+  }
+}
+function saveProgress(p: Progress | null) {
+  try {
+    if (p) window.localStorage.setItem(PROGRESS_KEY, JSON.stringify(p))
+    else window.localStorage.removeItem(PROGRESS_KEY)
+  } catch {
+    /* storage unavailable: resume just won't be offered */
+  }
+}
+
+const SAVED = loadProgress()
+
+function initialStack(): Screen[] {
+  try {
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('start') === 'home' || p.get('preview')) return ['home']
+  } catch {
+    /* ignore */
+  }
+  // Someone who left mid-signup comes back to the resume screen.
+  return SAVED ? ['welcome', 'obResume'] : ['welcome']
+}
 
 /**
  * forward / back: a UIKit push and pop.
@@ -86,7 +166,7 @@ function initialVariant(): SuccessVariant {
 
 export default function App() {
   const scale = useFitScale()
-  const [stack, setStack] = useState<Screen[]>(['home'])
+  const [stack, setStack] = useState<Screen[]>(initialStack)
   const [recipient, setRecipient] = useState<Recipient | null>(null)
   const [pendingTxn, setPendingTxn] = useState<PendingTxn | null>(null)
   const [invoice, setInvoice] = useState<Invoice | null>(null)
@@ -98,6 +178,15 @@ export default function App() {
   const [previewOutcome, setPreviewOutcome] = useState<Outcome>(initialOutcome)
   const [recentsScope, setRecentsScope] = useState<'bank' | 'parkway'>('bank')
   const [direction, setDirection] = useState<Direction>('forward')
+  const [phone, setPhone] = useState(SAVED?.phone ?? DEMO_PHONE)
+  const [idMethod, setIdMethod] = useState<IdMethod>(SAVED?.idMethod ?? 'bvn')
+  const [address, setAddress] = useState<Address | null>(SAVED?.address ?? null)
+  const [savedStep, setSavedStep] = useState(SAVED?.step ?? 0)
+  // Set while the "already have an account" sheet is up, so nothing is saved for resume.
+  const [existingAccount, setExistingAccount] = useState(false)
+  const [sim, setSim] = useState<Simulation>({ offline: false, faceFails: false })
+  const [newPin, setNewPin] = useState('2580')
+  const [idRecord, setIdRecord] = useState<IdentityRecord>(SAVED?.idRecord ?? DEMO_IDENTITY)
   const hasNavigated = useRef(false)
   const current = stack[stack.length - 1]
 
@@ -210,8 +299,111 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Prototype panel: jump to any onboarding screen with the stack it would have.
+  const jumpTo = (target: Screen) => {
+    const idx = ONBOARDING_ORDER.findIndex((o) => o.screen === target)
+    const currentIdx = ONBOARDING_ORDER.findIndex((o) => o.screen === current)
+    if (target === 'obPinConfirm') setNewPin('2580')
+    navigate(currentIdx >= 0 && idx < currentIdx ? 'back' : 'forward', () => ONBOARDING_ORDER.slice(0, idx + 1).map((o) => o.screen))
+  }
+
+  // Record the furthest step reached whenever an onboarding screen is shown.
+  useEffect(() => {
+    if (current !== 'obOtp') setExistingAccount(false)
+  }, [current])
+  useEffect(() => {
+    const step = STEP_OF[current]
+    if (!step || existingAccount) return
+    const next = Math.max(savedStep, step)
+    if (next !== savedStep) setSavedStep(next)
+    saveProgress({ step: next, phone, idMethod, idRecord, address })
+  }, [current, savedStep, phone, idMethod, idRecord, address, existingAccount])
+
+  const clearProgress = () => {
+    saveProgress(null)
+    setSavedStep(0)
+    setAddress(null)
+  }
+
+  // Start Again keeps the verified phone and restarts from BVN / NIN.
+  const startAgain = () => {
+    setAddress(null)
+    setIdMethod('bvn')
+    setIdRecord(DEMO_IDENTITY)
+    setSavedStep(2)
+    saveProgress({ step: 2, phone, idMethod: 'bvn', idRecord: DEMO_IDENTITY, address: null })
+    navigate('forward', () => ['welcome', 'obIdChoice'])
+  }
+
+  // Prototype panel: pretend the user left during liveness and came back.
+  const simulateReturn = () => {
+    setSavedStep(4)
+    setAddress({ street: '12 Admiralty Way', state: 'Lagos', lga: 'Eti-Osa', city: 'Lekki' })
+    saveProgress({ step: 4, phone, idMethod, idRecord, address: { street: '12 Admiralty Way', state: 'Lagos', lga: 'Eti-Osa', city: 'Lekki' } })
+    navigate('dismiss', () => ['welcome', 'obResume'])
+  }
+
   const renderScreen = (screen: Screen): ReactNode => {
     switch (screen) {
+      case 'welcome':
+        return <Welcome onCreateAccount={() => { clearProgress(); push('obPhone') }} />
+      case 'obResume':
+        return (
+          <ResumeSignup
+            currentStep={Math.max(1, savedStep)}
+            identity={{ label: idMethod.toUpperCase(), record: idRecord }}
+            onBack={pop}
+            onContinue={() => jumpTo(STEP_ENTRY[Math.max(1, savedStep)])}
+            onEditAddress={() => jumpTo('obAddress')}
+            onStartAgain={startAgain}
+          />
+        )
+      case 'obPhone':
+        return (
+          <PhoneNumber
+            onBack={pop}
+            onCodeSent={(n) => { setPhone(n); push('obOtp') }}
+          />
+        )
+      case 'obOtp':
+        return (
+          <VerifyOtp
+            phone={phone}
+            onBack={pop}
+            onVerified={() => push('obIdChoice')}
+            onExistingAccount={() => { setExistingAccount(true); clearProgress() }}
+          />
+        )
+      case 'obIdChoice':
+        return <IdentityChoice onBack={pop} onPick={(m) => { setIdMethod(m); push('obIdVerify') }} />
+      case 'obIdVerify':
+        return (
+          <IdentityVerification
+            key={idMethod}
+            method={idMethod}
+            onBack={pop}
+            onVerified={(r) => { setIdRecord(r); push('obAddress') }}
+          />
+        )
+      case 'obAddress':
+        return (
+          <AddressDetails
+            label={idMethod.toUpperCase()}
+            record={idRecord}
+            onBack={pop}
+            initial={address}
+            onContinue={(a) => { setAddress(a); push('obFace') }}
+          />
+        )
+      case 'obFace':
+        return <FaceVerification onBack={pop} onComplete={() => push('obPassword')} />
+      case 'obPassword':
+        return <CreatePassword onCreated={() => push('obPin')} />
+      case 'obPin':
+        return <SetPin key="set" mode="set" onDone={(p) => { setNewPin(p); push('obPinConfirm') }} />
+      case 'obPinConfirm':
+        // Account is ready: the wallet rises in like a result page.
+        return <SetPin key="confirm" mode="confirm" expected={newPin} onBack={pop} onDone={() => { clearProgress(); navigate('present', () => ['home']) }} />
       case 'home':
         return <Home onOpenTransfer={() => push('transfer')} />
       case 'transfer':
@@ -303,6 +495,8 @@ export default function App() {
   }, [leaving])
 
   const enterClass = hasNavigated.current ? `enter-${direction}` : ''
+  const chrome = { ...DEFAULT_CHROME, ...CHROME[current] }
+  const chromeTransition = 'background-color 420ms var(--ease-nav)'
 
   const layers: { key: string; el: ReactNode; className: string; isLeaving: boolean }[] = []
   if (leaving && leaving.key !== screenKey) {
@@ -312,6 +506,7 @@ export default function App() {
 
   return (
     <div className="h-screen w-full flex items-center justify-center overflow-hidden no-tap-highlight p-4">
+      <OnboardingPanel current={current} sim={sim} onSim={setSim} onJump={jumpTo} onSimulateReturn={simulateReturn} onStartOver={() => { clearProgress(); navigate('dismiss', () => ['welcome']) }} />
       <VariantPanel
         variant={variant}
         onVariant={setVariant}
@@ -337,7 +532,13 @@ export default function App() {
         >
           <PhoneFrame>
             <div id="phone-screen" className="h-full w-full flex flex-col">
-              <StatusBar theme="light" />
+              <div style={{ background: chrome.top, transition: chromeTransition }}>
+                <StatusBar theme={chrome.dark ? 'dark' : 'light'} />
+              </div>
+              <SimulationContext.Provider value={sim}>
+              <OnboardingProgressContext.Provider
+                value={{ identity: { label: idMethod.toUpperCase(), record: idRecord }, onEditAddress: () => jumpTo('obAddress') }}
+              >
               <div className="relative flex-1 overflow-hidden bg-parkway-bg">
                 {layers.map((l) => (
                   <div
@@ -357,7 +558,11 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              <HomeIndicator theme="light" />
+              </OnboardingProgressContext.Provider>
+              </SimulationContext.Provider>
+              <div style={{ background: chrome.bottom, transition: chromeTransition }}>
+                <HomeIndicator theme={chrome.dark ? 'dark' : 'light'} />
+              </div>
             </div>
           </PhoneFrame>
         </div>
@@ -482,5 +687,94 @@ function VariantPanel({
         </button>
       </div>
     </div>
+  )
+}
+
+/** Prototype-only control on the right: jump between onboarding screens. */
+function OnboardingPanel({
+  current,
+  sim,
+  onSim,
+  onJump,
+  onSimulateReturn,
+  onStartOver,
+}: {
+  current: Screen
+  sim: Simulation
+  onSim: (s: Simulation) => void
+  onJump: (s: Screen) => void
+  onSimulateReturn: () => void
+  onStartOver: () => void
+}) {
+  return (
+    <div className="hidden min-[1200px]:flex fixed right-6 top-1/2 -translate-y-1/2 w-[232px] max-h-[calc(100vh-32px)] overflow-y-auto hide-scrollbar flex-col gap-3 rounded-[18px] bg-white/90 backdrop-blur p-4 shadow-[0_20px_50px_-24px_rgba(0,0,0,0.25)] border border-black/5 font-manrope">
+      <div>
+        <p className="font-bold text-[13px] text-parkway-grey10">Onboarding</p>
+        <p className="mt-0.5 font-medium text-[11px] leading-[1.4] text-parkway-grey02">Jump to any screen.</p>
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {ONBOARDING_ORDER.map((o) => {
+          const on = o.screen === current
+          return (
+            <button
+              key={o.screen}
+              type="button"
+              onClick={() => onJump(o.screen)}
+              className="text-left rounded-[10px] px-3 py-2 font-semibold text-[12px] transition-colors"
+              style={{ background: on ? '#FEF5F1' : 'transparent', color: on ? '#C77756' : '#1F1F1F' }}
+            >
+              {o.label}
+            </button>
+          )
+        })}
+      </div>
+      <div className="rounded-[10px] bg-parkway-grey06 p-3 font-medium text-[11px] leading-[1.5] text-parkway-grey09 space-y-1">
+        <p className="font-bold text-parkway-grey10">Test inputs</p>
+        <p>Code <b>{OTP_REJECT}</b> is rejected; any other code works.</p>
+        <p>A phone ending <b>0000</b> (e.g. 0803 000 0000) already has an account.</p>
+        <p>A BVN/NIN starting <b>{ID_NOT_FOUND_PREFIX}</b> has no record.</p>
+        <p>Face check uses your camera, or simulates one if blocked.</p>
+        <p>Easy PINs (1234, 0000…) are refused. Jumping to Confirm PIN expects <b>2580</b>.</p>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Toggle label="Simulate offline" on={sim.offline} onChange={(v) => onSim({ ...sim, offline: v })} />
+        <Toggle label="Face check fails" on={sim.faceFails} onChange={(v) => onSim({ ...sim, faceFails: v })} />
+      </div>
+      <button
+        type="button"
+        onClick={onSimulateReturn}
+        className="h-9 rounded-[8px] font-semibold text-[12px] active:scale-[0.97] transition-[transform,background-color]"
+        style={{ background: current === 'obResume' ? '#FEF5F1' : '#FFF', color: '#C77756', border: '1px solid #FDD5C4' }}
+      >
+        Returning user (resume)
+      </button>
+      <button
+        type="button"
+        onClick={onStartOver}
+        className="h-9 rounded-[8px] bg-parkway-grey05 text-parkway-grey10 font-semibold text-[12px] active:scale-[0.97] transition-transform"
+      >
+        Start over
+      </button>
+    </div>
+  )
+}
+
+function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className="flex items-center justify-between rounded-[10px] px-3 py-2 hover:bg-parkway-grey06 transition-colors"
+    >
+      <span className="font-semibold text-[12px] text-parkway-grey10">{label}</span>
+      <span className="relative h-5 w-9 rounded-full transition-colors duration-200" style={{ background: on ? '#F9956B' : '#DDDDDD' }}>
+        <span
+          className="absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform duration-200"
+          style={{ transform: on ? 'translateX(16px)' : 'none' }}
+        />
+      </span>
+    </button>
   )
 }

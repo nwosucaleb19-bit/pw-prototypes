@@ -118,6 +118,9 @@ body {
 }
 .rise-in { animation: riseIn 640ms var(--ease-arrive) both; animation-delay: var(--d, 0ms); }
 
+/* Onboarding stepper: the newly reached segment fills from the left. */
+@keyframes segFill { from { width: 0%; } to { width: 100%; } }
+
 /* ── Typed characters ────────────────────────────────────────
    Each new character opens its own width while it rises out of a
    blur, so the centered amount glides instead of jumping. Removed
