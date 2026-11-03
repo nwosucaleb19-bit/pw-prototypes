@@ -28,4 +28,152 @@ body {
   .no-tap-highlight {
     -webkit-tap-highlight-color: transparent;
   }
+  .hide-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Motion tokens
+   Two jobs, two curves (plus the iOS navigation curve):
+   - arrive:  things appearing from nowhere settle on a long soft tail
+   - travel:  things moving between two places depart and arrive softly
+   - nav:     UIKit-like push / pop
+   - pop:     small expressive accents (check marks, dots) may overshoot
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --ease-arrive: cubic-bezier(0.25, 0.8, 0.25, 1);
+  --ease-travel: cubic-bezier(0.45, 0, 0.1, 1);
+  --ease-nav: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Screen transitions ──────────────────────────────────────
+   Both screens stay on stage during a navigation: the new one
+   arrives while the old one recedes, so there is never a blank
+   frame behind a sliding page. */
+.screen-layer {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+}
+.screen-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+.screen-leaving { pointer-events: none; }
+
+@keyframes pushIn        { from { transform: translate3d(100%, 0, 0); } to { transform: none; } }
+@keyframes pushBehind    { from { transform: none; } to { transform: translate3d(-28%, 0, 0); } }
+@keyframes popFromBehind { from { transform: translate3d(-28%, 0, 0); } to { transform: none; } }
+@keyframes popOut        { from { transform: none; } to { transform: translate3d(100%, 0, 0); } }
+@keyframes dimIn         { from { opacity: 0; } to { opacity: 0.08; } }
+@keyframes dimOut        { from { opacity: 0.08; } to { opacity: 0; } }
+@keyframes presentIn {
+  from { opacity: 0; transform: translate3d(0, 28px, 0) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes presentBehind { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.97); } }
+@keyframes dismissOut {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translate3d(0, 36px, 0); }
+}
+@keyframes dismissReveal { from { opacity: 0.4; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+
+.enter-forward { z-index: 2; animation: pushIn 440ms var(--ease-nav) both; box-shadow: -16px 0 40px rgba(0, 0, 0, 0.08); }
+.leave-forward { z-index: 1; animation: pushBehind 440ms var(--ease-nav) both; }
+.leave-forward::after { animation: dimIn 440ms var(--ease-nav) both; }
+
+.enter-back { z-index: 1; animation: popFromBehind 400ms var(--ease-nav) both; }
+.enter-back::after { animation: dimOut 400ms var(--ease-nav) both; }
+.leave-back { z-index: 2; animation: popOut 400ms var(--ease-nav) both; box-shadow: -16px 0 40px rgba(0, 0, 0, 0.08); }
+
+.enter-present { z-index: 2; animation: presentIn 560ms var(--ease-arrive) both; }
+.leave-present { z-index: 1; animation: presentBehind 380ms var(--ease-arrive) both; }
+
+.enter-dismiss { z-index: 1; animation: dismissReveal 520ms var(--ease-arrive) both; }
+.leave-dismiss { z-index: 2; animation: dismissOut 360ms var(--ease-travel) both; }
+
+/* ── Soft arrivals ───────────────────────────────────────────
+   The shared "soft ease fade": a short rise out of a light blur.
+   Used for status rows, hints and anything that appears in place. */
+@keyframes softIn {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); filter: blur(3px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+.animate-soft-in { animation: softIn 320ms var(--ease-arrive) both; }
+
+/* Staggered rise used on the success pages. Set --d for the delay. */
+@keyframes riseIn {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); filter: blur(2px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+.rise-in { animation: riseIn 640ms var(--ease-arrive) both; animation-delay: var(--d, 0ms); }
+
+/* ── Typed characters ────────────────────────────────────────
+   Each new character opens its own width while it rises out of a
+   blur, so the centered amount glides instead of jumping. Removed
+   characters close their width as they fade. */
+.soft-char {
+  display: inline-block;
+  white-space: pre;
+}
+@keyframes softCharIn {
+  from { opacity: 0; transform: translate3d(0, 0.22em, 0) scale(0.92); filter: blur(5px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes softCharGrow { from { max-width: 0; } to { max-width: 0.75em; } }
+@keyframes softCharOut {
+  from { opacity: 1; max-width: 0.75em; transform: none; filter: blur(0); }
+  to   { opacity: 0; max-width: 0; transform: translate3d(0, -0.14em, 0) scale(0.92); filter: blur(4px); }
+}
+.soft-char-in {
+  animation:
+    softCharIn 340ms var(--ease-arrive) both,
+    softCharGrow 260ms var(--ease-arrive) backwards;
+}
+.soft-char-out {
+  animation: softCharOut 220ms var(--ease-arrive) forwards;
+}
+
+/* ── Outcome marks (success / pending / failed) ─────────────── */
+@keyframes markPop {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes markHalo {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes markRipple {
+  0%   { opacity: 0; transform: scale(1); }
+  10%  { opacity: 0.45; }
+  100% { opacity: 0; transform: scale(1.75); }
+}
+@keyframes checkDraw { to { stroke-dashoffset: 0; } }
+/* Wipes an icon in from the left, like a stroke being drawn. */
+@keyframes iconReveal {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+/* The pending mark's stroke drops into place, then its dot follows. */
+@keyframes markPartIn {
+  from { opacity: 0; transform: translate3d(0, -6px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
 }

@@ -1,342 +1,486 @@
-import { useEffect, useMemo, useState } from 'react'
-import ArrowDown from './assets/arrow-down.svg'
-import HeaderVector from './assets/header-vector.svg'
-import UserVector from './assets/user-vector.svg'
-import CheckGroup from './assets/check-group.svg'
-import Info from './assets/info.svg'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import PhoneFrame, { StatusBar, HomeIndicator } from './components/PhoneFrame'
+import Home from './screens/Home'
+import Transfer, { type Recipient } from './screens/Transfer'
+import SendToBank from './screens/SendToBank'
+import Send from './screens/Send'
+import TransferSuccessRateMonitor from './screens/TransferSuccessRateMonitor'
+import RecentsBeneficiaries from './screens/RecentsBeneficiaries'
+import PinEntry from './screens/PinEntry'
+import SendToParkway from './screens/SendToParkway'
+import SendToInvoice from './screens/SendToInvoice'
+import InvoicePinEntry from './screens/InvoicePinEntry'
+import Success, {
+  SUCCESS_VARIANTS,
+  invoiceSuccessData,
+  makeReceiptMeta,
+  transferSuccessData,
+  type SuccessData,
+  type SuccessVariant,
+} from './screens/Success'
+import { INVOICES, type Invoice } from './data/invoices'
+import type { Outcome } from './components/OutcomeMark'
 
-const WALLET_BALANCE = 2000
-const DAILY_LIMIT_REMAINING = 200000
-const PRESETS = [500, 1000, 1500, 5000, 10000, 20000]
-const REASONS = ['Transfer', 'For Food', 'For Bills'] as const
+type Screen =
+  | 'home' | 'transfer'
+  | 'sendToBank' | 'sendToParkway' | 'sendToInvoice'
+  | 'send' | 'pin' | 'invoicePin'
+  | 'successMonitor' | 'recentsBeneficiaries'
+  | 'success'
 
-type Reason = (typeof REASONS)[number]
+/**
+ * forward / back: a UIKit push and pop.
+ * present: the success page rises over the flow.
+ * dismiss: the success page leaves and reveals where the user lands.
+ */
+type Direction = 'forward' | 'back' | 'present' | 'dismiss'
 
-function formatNaira(value: number) {
-  return value.toLocaleString('en-NG', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
+type PendingTxn = { amount: number; description: string }
+
+const DEVICE_W = 415
+const DEVICE_H = 874
+const PAD = 32
+
+const DEMO_RECIPIENT: Recipient = {
+  name: 'Adetula Mabel',
+  channel: 'Zenith Bank',
+  maskedAccount: '0015***018',
+  fullAccount: '0015478018',
+  bankCode: 'zenith',
 }
 
-function formatLimit(value: number) {
-  return value.toLocaleString('en-NG', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
+function useFitScale() {
+  const [scale, setScale] = useState(1)
+  useEffect(() => {
+    const recompute = () => {
+      // Figma captures need the screen at its true size.
+      if (window.location.hash.includes('figmacapture')) return setScale(1)
+      const s = Math.min(
+        1,
+        (window.innerHeight - PAD) / DEVICE_H,
+        (window.innerWidth - PAD) / DEVICE_W,
+      )
+      setScale(s)
+    }
+    recompute()
+    window.addEventListener('resize', recompute)
+    return () => window.removeEventListener('resize', recompute)
+  }, [])
+  return scale
 }
 
-function CheckCorner() {
-  return (
-    <img
-      src={CheckGroup}
-      alt=""
-      aria-hidden
-      className="pointer-events-none absolute top-0 right-0 h-[20.8px] w-[28.5px]"
-    />
-  )
+const VARIANT_KEY = 'pw.successVariant'
+
+function initialVariant(): SuccessVariant {
+  const ids = SUCCESS_VARIANTS.map((v) => v.id)
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get('success') as SuccessVariant | null
+    if (fromUrl && ids.includes(fromUrl)) return fromUrl
+    const stored = window.localStorage.getItem(VARIANT_KEY) as SuccessVariant | null
+    if (stored && ids.includes(stored)) return stored
+  } catch {
+    /* storage unavailable: fall through to the default */
+  }
+  return 'receipt'
 }
 
 export default function App() {
-  const [amount, setAmount] = useState<string>('5000')
-  const [amountFocused, setAmountFocused] = useState<boolean>(false)
-  const [reason, setReason] = useState<Reason>('Transfer')
-  const [description, setDescription] = useState<string>('Transfer')
-  const [submitted, setSubmitted] = useState<boolean>(false)
-  const [shakeAmount, setShakeAmount] = useState<number>(0)
-
-  const numericAmount = useMemo(() => {
-    const n = parseFloat(amount.replace(/,/g, ''))
-    return Number.isFinite(n) ? n : 0
-  }, [amount])
-
-  const overBalance = numericAmount > WALLET_BALANCE
-  const canSubmit = numericAmount > 0 && !overBalance
+  const scale = useFitScale()
+  const [stack, setStack] = useState<Screen[]>(['home'])
+  const [recipient, setRecipient] = useState<Recipient | null>(null)
+  const [pendingTxn, setPendingTxn] = useState<PendingTxn | null>(null)
+  const [invoice, setInvoice] = useState<Invoice | null>(null)
+  const [successData, setSuccessData] = useState<SuccessData | null>(null)
+  const [variant, setVariant] = useState<SuccessVariant>(initialVariant)
+  // Where the last transfer ended up; drives which result screen shows.
+  const [outcome, setOutcome] = useState<Outcome>('success')
+  // Outcome used by the side panel's preview buttons.
+  const [previewOutcome, setPreviewOutcome] = useState<Outcome>(initialOutcome)
+  const [recentsScope, setRecentsScope] = useState<'bank' | 'parkway'>('bank')
+  const [direction, setDirection] = useState<Direction>('forward')
+  const hasNavigated = useRef(false)
+  const current = stack[stack.length - 1]
 
   useEffect(() => {
-    if (!overBalance) return
-    setShakeAmount((n) => n + 1)
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      navigator.vibrate([35, 40, 35, 40, 35])
+    try {
+      window.localStorage.setItem(VARIANT_KEY, variant)
+    } catch {
+      /* ignore */
     }
-  }, [numericAmount, overBalance])
+  }, [variant])
 
-  const handleConfirm = () => {
-    if (!canSubmit) return
-    setSubmitted(true)
+  const navigate = useCallback((dir: Direction, next: (s: Screen[]) => Screen[]) => {
+    hasNavigated.current = true
+    setDirection(dir)
+    setStack(next)
+  }, [])
+
+  const push = useCallback((screen: Screen) => navigate('forward', (s) => [...s, screen]), [navigate])
+  const present = useCallback((screen: Screen) => navigate('present', (s) => [...s, screen]), [navigate])
+  const pop = useCallback(
+    () => navigate('back', (s) => (s.length > 1 ? s.slice(0, -1) : s)),
+    [navigate],
+  )
+
+  const finish = useCallback(() => {
+    navigate('dismiss', () => ['home'])
+    setRecipient(null)
+    setPendingTxn(null)
+    setInvoice(null)
+  }, [navigate])
+
+  const sendAgain = useCallback(() => {
+    // Back to the amount step with the same recipient.
+    navigate('dismiss', () => ['home', 'transfer', 'send'])
+    setPendingTxn(null)
+  }, [navigate])
+
+  const handleProceedToPin = useCallback(
+    (txn: PendingTxn) => {
+      setPendingTxn(txn)
+      push('pin')
+    },
+    [push],
+  )
+
+  const handleConfirmInvoice = useCallback(
+    (inv: Invoice) => {
+      setInvoice(inv)
+      push('invoicePin')
+    },
+    [push],
+  )
+
+  const handlePickRecipient = useCallback(
+    (r: Recipient) => {
+      setRecipient(r)
+      push('send')
+    },
+    [push],
+  )
+
+  const handleTransferPinSuccess = (result: Outcome) => {
+    if (!recipient || !pendingTxn) return
+    setOutcome(result)
+    setSuccessData(transferSuccessData(recipient, pendingTxn.amount, pendingTxn.description, makeReceiptMeta()))
+    present('success')
   }
 
-  const displayAmount =
-    amount === ''
-      ? '0.00'
-      : formatNaira(numericAmount)
+  const handleInvoicePinSuccess = (result: Outcome) => {
+    if (!invoice) return
+    setOutcome(result)
+    setSuccessData(invoiceSuccessData(invoice, makeReceiptMeta()))
+    present('success')
+  }
 
-  const amountFieldValue = amountFocused
-    ? amount
-    : amount === ''
-      ? ''
-      : formatNaira(numericAmount)
+  // A failed transfer goes back to the PIN step with the same details.
+  const tryAgain = useCallback(() => {
+    if (successData?.kind === 'invoice') {
+      navigate('dismiss', () => ['home', 'transfer', 'sendToInvoice', 'invoicePin'])
+    } else {
+      navigate('dismiss', () => ['home', 'transfer', 'send', 'pin'])
+    }
+  }, [navigate, successData?.kind])
+
+  const previewSuccess = (kind: 'transfer' | 'invoice', result: Outcome = previewOutcome) => {
+    const meta = makeReceiptMeta()
+    setOutcome(result)
+    if (kind === 'transfer') {
+      setRecipient(DEMO_RECIPIENT)
+      setPendingTxn({ amount: 5000, description: 'For Food' })
+      setSuccessData(transferSuccessData(DEMO_RECIPIENT, 5000, 'For Food', meta))
+    } else {
+      const inv = INVOICES[0]
+      setInvoice(inv)
+      setRecipient(null)
+      setSuccessData(invoiceSuccessData(inv, meta))
+    }
+    navigate('present', () => ['home', 'success'])
+  }
+
+  // `?preview=transfer|invoice` opens straight on the success page (used for Figma captures).
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get('preview')
+      if (p === 'transfer' || p === 'invoice') previewSuccess(p)
+    } catch {
+      /* ignore */
+    }
+    // Run once on load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const renderScreen = (screen: Screen): ReactNode => {
+    switch (screen) {
+      case 'home':
+        return <Home onOpenTransfer={() => push('transfer')} />
+      case 'transfer':
+        return (
+          <Transfer
+            onBack={pop}
+            onPickRecipient={handlePickRecipient}
+            onOpenToBank={() => push('sendToBank')}
+            onOpenToParkway={() => push('sendToParkway')}
+            onOpenToInvoice={() => push('sendToInvoice')}
+          />
+        )
+      case 'sendToBank':
+        return (
+          <SendToBank
+            onBack={pop}
+            onConfirmRecipient={handlePickRecipient}
+            onOpenSuccessMonitor={() => push('successMonitor')}
+            onOpenSeeAll={() => { setRecentsScope('bank'); push('recentsBeneficiaries') }}
+          />
+        )
+      case 'sendToParkway':
+        return (
+          <SendToParkway
+            onBack={pop}
+            onConfirmRecipient={handlePickRecipient}
+            onOpenSeeAll={() => { setRecentsScope('parkway'); push('recentsBeneficiaries') }}
+          />
+        )
+      case 'sendToInvoice':
+        return <SendToInvoice onBack={pop} onConfirm={handleConfirmInvoice} />
+      case 'invoicePin':
+        return invoice ? <InvoicePinEntry onBack={pop} onSuccess={handleInvoicePinSuccess} /> : null
+      case 'successMonitor':
+        return <TransferSuccessRateMonitor onBack={pop} />
+      case 'recentsBeneficiaries':
+        return (
+          <RecentsBeneficiaries onBack={pop} onPickRecipient={handlePickRecipient} scope={recentsScope} />
+        )
+      case 'send':
+        return recipient ? (
+          <Send recipient={recipient} onBack={pop} onProceedToPin={handleProceedToPin} />
+        ) : null
+      case 'pin':
+        return recipient && pendingTxn ? (
+          <PinEntry
+            title="Send Money"
+            onBack={pop}
+            onSuccess={handleTransferPinSuccess}
+          />
+        ) : null
+      case 'success':
+        return successData ? (
+          <Success
+            // A new receipt or a variant switch replays the entrance.
+            key={`${successData.reference}-${variant}-${outcome}`}
+            data={successData}
+            variant={variant}
+            outcome={outcome}
+            onDone={finish}
+            onSendAgain={successData.kind === 'transfer' && recipient ? sendAgain : undefined}
+            onTryAgain={tryAgain}
+          />
+        ) : null
+    }
+  }
+
+  const screenKey = `${current}-${stack.length}`
+  const currentEl = renderScreen(current)
+
+  // ── Keep the previous screen on stage while the next one arrives ──
+  // The leaving screen keeps its key, so React keeps the same instance
+  // (its state, e.g. a green PIN, stays visible while it recedes).
+  const prevRef = useRef<{ key: string; el: ReactNode } | null>(null)
+  const [leaving, setLeaving] = useState<{ key: string; el: ReactNode; dir: Direction } | null>(null)
+  const prev = prevRef.current
+  if (prev && prev.key !== screenKey && leaving?.key !== prev.key) {
+    setLeaving({ key: prev.key, el: prev.el, dir: direction })
+  }
+  useLayoutEffect(() => {
+    prevRef.current = { key: screenKey, el: currentEl }
+  })
+
+  // Safety net in case an animationend never fires (e.g. a hidden tab).
+  useEffect(() => {
+    if (!leaving) return
+    const t = window.setTimeout(() => setLeaving(null), 900)
+    return () => window.clearTimeout(t)
+  }, [leaving])
+
+  const enterClass = hasNavigated.current ? `enter-${direction}` : ''
+
+  const layers: { key: string; el: ReactNode; className: string; isLeaving: boolean }[] = []
+  if (leaving && leaving.key !== screenKey) {
+    layers.push({ key: leaving.key, el: leaving.el, className: `leave-${leaving.dir} screen-leaving`, isLeaving: true })
+  }
+  layers.push({ key: screenKey, el: currentEl, className: enterClass, isLeaving: false })
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4 sm:p-8 no-tap-highlight">
-      <div className="relative w-[375px] h-[812px] bg-parkway-bg rounded-[40px] shadow-phone overflow-hidden ring-1 ring-black/5">
-        {/* Header */}
-        <div className="relative h-[110px] w-full bg-white border-b border-[#E6E6E6] overflow-hidden">
-          <img
-            src={HeaderVector}
-            alt=""
-            aria-hidden
-            className="pointer-events-none select-none absolute -top-6 -right-10 w-[260px] opacity-80"
-          />
-          <button
-            type="button"
-            aria-label="Go back"
-            className="absolute left-[10px] top-[61px] size-[28px] rounded-md bg-white flex items-center justify-center active:scale-95 transition-transform"
-          >
-            <img src={ArrowDown} alt="" className="size-5 rotate-90" />
-          </button>
-          <h1 className="absolute left-1/2 -translate-x-1/2 top-[58px] text-[20px] leading-[1.52] font-display font-semibold text-parkway-grey10 tracking-tightish whitespace-nowrap">
-            Send To Parkway Wallet
-          </h1>
-        </div>
-
-        {/* Body */}
-        <div className="absolute left-[20px] top-[142px] w-[335px] flex flex-col gap-[13px]">
-          {/* Recipient Card */}
-          <section className="bg-white rounded-[12px] px-5 py-4 flex flex-col gap-[11px]">
-            <p className="font-jakarta font-semibold text-[14px] leading-none text-[#979797] tracking-[-0.14px]">
-              Sending money to
-            </p>
-            <div className="flex items-center gap-[11px]">
-              <div className="relative size-8 rounded-full bg-[#F9956B]/10 flex items-center justify-center">
-                <img src={UserVector} alt="" className="w-4 h-[15px]" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <p className="font-manrope font-semibold text-[14px] text-parkway-grey10 tracking-[-0.14px] uppercase leading-none">
-                  Adetula Mabel
-                </p>
-                <p className="font-manrope font-medium text-[12px] text-[#979797] tracking-[-0.12px] leading-none">
-                  2262890261 | Parkway Projects
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {/* Amount Card */}
-          <section className="bg-white rounded-[12px] pt-[14px] pb-5 px-7 flex flex-col items-center">
-            <div className="w-full flex flex-col items-center gap-[23px]">
-              <div className="flex flex-col items-center gap-4">
-                <div
-                  className="flex items-center px-2 py-1 rounded-[4px] bg-[#FFC700]/10"
-                  aria-live="polite"
-                >
-                  <span className="font-manrope font-medium text-[11px] leading-[1.415] whitespace-nowrap text-parkway-tangerine08">
-                    Wallet Balance: ₦{WALLET_BALANCE.toLocaleString('en-NG')}
-                  </span>
-                </div>
-                <div
-                  key={shakeAmount}
-                  className={`flex flex-col items-center gap-2 w-full relative ${
-                    shakeAmount > 0 ? 'animate-amount-shake' : ''
-                  }`}
-                  style={{ transformOrigin: 'center' }}
-                >
-                  <p className="font-manrope font-medium text-[11px] text-[#979797] text-center tracking-[-0.11px]">
-                    Amount to send
-                  </p>
-                  <div className="relative flex items-end justify-center">
-                    <span
-                      className={`font-manrope font-bold text-[16px] tracking-[-0.48px] self-center pr-1 transition-colors ${
-                        overBalance ? 'text-[#D94141]/70' : 'text-[#979797]'
-                      }`}
-                    >
-                      ₦
-                    </span>
-                    <input
-                      inputMode="decimal"
-                      value={amountFieldValue}
-                      onFocus={() => setAmountFocused(true)}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9.]/g, '')
-                        setAmount(raw)
-                      }}
-                      onBlur={() => {
-                        setAmountFocused(false)
-                        if (amount && !isNaN(Number(amount))) {
-                          setAmount(String(Number(amount)))
-                        }
-                      }}
-                      aria-label="Amount to send"
-                      aria-invalid={overBalance}
-                      aria-describedby={overBalance ? 'amount-error' : undefined}
-                      className={`font-display font-semibold text-[30px] tracking-[-1.2px] bg-transparent outline-none text-center w-[150px] caret-parkway-tangerine01 transition-colors ${
-                        overBalance ? 'text-[#D94141]' : 'text-parkway-grey09'
-                      }`}
-                      style={{ fontVariantNumeric: 'tabular-nums' }}
-                      placeholder="0.00"
-                    />
-                  </div>
-                  {overBalance && (
-                    <p
-                      id="amount-error"
-                      className="font-manrope font-medium text-[11px] text-[#D94141] text-center tracking-[-0.11px] whitespace-nowrap animate-error-fade-in"
-                    >
-                      Amount entered exceeds balance
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="w-full h-px bg-[#EFEFEF]" />
-
-              {/* Preset grid */}
-              <div className="w-full grid grid-cols-3 gap-[13px]">
-                {PRESETS.map((p) => {
-                  const selected = numericAmount === p
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setAmount(String(p))}
-                      className={`relative h-[33px] rounded-[10px] border font-manrope font-bold text-[12px] tracking-[-0.12px] overflow-hidden transition-all active:scale-[0.97] ${
-                        selected
-                          ? 'border-parkway-tangerine01/40 bg-[#F9956B]/10 text-[#464646]'
-                          : 'border-[#9797974D] bg-white text-[#464646] hover:border-parkway-tangerine01/60'
-                      }`}
-                    >
-                      ₦{p.toLocaleString('en-NG')}
-                      {selected && <CheckCorner />}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          </section>
-
-          {/* Description Card */}
-          <section className="bg-white rounded-[12px] px-4 py-3 flex flex-col gap-2">
-            <label
-              htmlFor="desc"
-              className="font-manrope font-medium text-[12px] text-parkway-grey09 leading-[1.415]"
-            >
-              Description
-            </label>
-            <input
-              id="desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="bg-[#FBFBFB] border border-[#EFEFEF] rounded-[4px] px-4 py-[14px] font-manrope font-medium text-[12px] text-[#1F1F1F] leading-[1.415] outline-none focus:border-parkway-tangerine01/60 transition-colors"
-              placeholder="Add a note…"
-            />
-            <div className="flex gap-[13px] h-[33px]">
-              {REASONS.map((r) => {
-                const selected = reason === r
-                return (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => {
-                      setReason(r)
-                      setDescription(r)
-                    }}
-                    className={`relative flex-1 h-[33px] rounded-[10px] border font-manrope font-medium text-[12px] tracking-[-0.12px] overflow-hidden transition-all active:scale-[0.97] ${
-                      selected
-                        ? 'border-parkway-tangerine01/40 bg-[#F9956B]/10 text-[#464646]'
-                        : 'border-[#9797974D] bg-white text-[#464646] hover:border-parkway-tangerine01/60'
-                    }`}
+    <div className="h-screen w-full flex items-center justify-center overflow-hidden no-tap-highlight p-4">
+      <VariantPanel
+        variant={variant}
+        onVariant={setVariant}
+        outcome={previewOutcome}
+        onOutcome={setPreviewOutcome}
+        onPreview={(kind) => previewSuccess(kind)}
+        onSuccessScreen={current === 'success'}
+      />
+      <div
+        style={{
+          width: DEVICE_W * scale,
+          height: DEVICE_H * scale,
+          position: 'relative',
+        }}
+      >
+        <div
+          style={{
+            width: DEVICE_W,
+            height: DEVICE_H,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+          }}
+        >
+          <PhoneFrame>
+            <div id="phone-screen" className="h-full w-full flex flex-col">
+              <StatusBar theme="light" />
+              <div className="relative flex-1 overflow-hidden bg-parkway-bg">
+                {layers.map((l) => (
+                  <div
+                    key={l.key}
+                    className={`screen-layer ${l.className}`}
+                    aria-hidden={l.isLeaving || undefined}
+                    inert={l.isLeaving}
+                    onAnimationEnd={
+                      l.isLeaving
+                        ? (e) => {
+                            if (e.target === e.currentTarget) setLeaving(null)
+                          }
+                        : undefined
+                    }
                   >
-                    {r}
-                    {selected && <CheckCorner />}
-                  </button>
-                )
-              })}
+                    {l.el}
+                  </div>
+                ))}
+              </div>
+              <HomeIndicator theme="light" />
             </div>
-          </section>
-
-          {/* Info bar */}
-          <div className="bg-[#FFC700]/10 rounded-[4px] p-2 flex items-start gap-1">
-            <img src={Info} alt="" className="size-[14px] shrink-0 mt-px" />
-            <p className="text-[10px] leading-[1.415] font-manrope">
-              <span className="text-[#808080] font-normal">
-                Your remaining daily transfer limit is{' '}
-              </span>
-              <span className="text-[#121212] font-semibold">
-                ₦{formatLimit(DAILY_LIMIT_REMAINING)}
-              </span>
-            </p>
-          </div>
+          </PhoneFrame>
         </div>
+      </div>
+    </div>
+  )
+}
 
-        {/* Confirm button */}
+/**
+ * Prototype-only control, outside the phone: pick a success-screen variant
+ * and jump straight to it without walking the whole flow.
+ */
+const OUTCOMES: { id: Outcome; label: string; pin: string }[] = [
+  { id: 'success', label: 'Success', pin: '0000' },
+  { id: 'pending', label: 'Pending', pin: '1111' },
+  { id: 'failed', label: 'Failed', pin: '2222' },
+]
+
+function initialOutcome(): Outcome {
+  try {
+    const o = new URLSearchParams(window.location.search).get('outcome')
+    if (o === 'success' || o === 'pending' || o === 'failed') return o
+  } catch {
+    /* ignore */
+  }
+  return 'success'
+}
+
+function VariantPanel({
+  variant,
+  onVariant,
+  outcome,
+  onOutcome,
+  onPreview,
+  onSuccessScreen,
+}: {
+  variant: SuccessVariant
+  onVariant: (v: SuccessVariant) => void
+  outcome: Outcome
+  onOutcome: (o: Outcome) => void
+  onPreview: (kind: 'transfer' | 'invoice') => void
+  onSuccessScreen: boolean
+}) {
+  return (
+    <div className="hidden min-[960px]:flex fixed left-6 top-1/2 -translate-y-1/2 w-[232px] flex-col gap-3 rounded-[18px] bg-white/90 backdrop-blur p-4 shadow-[0_20px_50px_-24px_rgba(0,0,0,0.25)] border border-black/5 font-manrope">
+      <div>
+        <p className="font-bold text-[13px] text-parkway-grey10">Success screen</p>
+        <p className="mt-0.5 font-medium text-[11px] leading-[1.4] text-parkway-grey02">
+          {onSuccessScreen ? 'Switching replays the page.' : 'Applies to transfers and invoices.'}
+        </p>
+      </div>
+      <div className="flex flex-col gap-1" role="radiogroup" aria-label="Success screen variant">
+        {SUCCESS_VARIANTS.map((v) => {
+          const on = v.id === variant
+          return (
+            <button
+              key={v.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              onClick={() => onVariant(v.id)}
+              className="text-left rounded-[10px] px-3 py-2 transition-colors"
+              style={{ background: on ? '#FEF5F1' : 'transparent' }}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className="size-3.5 rounded-full border-2 flex items-center justify-center transition-colors"
+                  style={{ borderColor: on ? '#F9956B' : '#C6C6C6' }}
+                >
+                  <span
+                    className="size-1.5 rounded-full bg-parkway-tangerine01 transition-transform duration-200"
+                    style={{ transform: on ? 'scale(1)' : 'scale(0)' }}
+                  />
+                </span>
+                <span className="font-bold text-[13px] text-parkway-grey10">{v.label}</span>
+              </span>
+              <span className="mt-0.5 block pl-[22px] font-medium text-[11px] leading-[1.4] text-parkway-grey02">
+                {v.hint}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex flex-col gap-1.5 pt-1">
+        <p className="font-bold text-[13px] text-parkway-grey10">Outcome</p>
+        <div className="grid grid-cols-3 gap-1 rounded-[10px] bg-parkway-grey06 p-1" role="radiogroup" aria-label="Preview outcome">
+          {OUTCOMES.map((o) => {
+            const on = o.id === outcome
+            return (
+              <button
+                key={o.id}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                onClick={() => onOutcome(o.id)}
+                className="h-7 rounded-[7px] font-semibold text-[12px] transition-colors"
+                style={{ background: on ? '#fff' : 'transparent', color: on ? '#1F1F1F' : '#999', boxShadow: on ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}
+              >
+                {o.label}
+              </button>
+            )
+          })}
+        </div>
+        <p className="font-medium text-[11px] leading-[1.4] text-parkway-grey02">
+          In the flow, PIN {OUTCOMES.map((o) => `${o.pin} ${o.label.toLowerCase()}`).join(', ')}.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-2 pt-1">
         <button
           type="button"
-          aria-disabled={!canSubmit}
-          onClick={handleConfirm}
-          className={`absolute left-[20px] bottom-[21px] w-[335px] h-[48px] rounded-[8px] font-manrope font-semibold text-[14px] leading-[1.8] transition-all active:scale-[0.98] ${
-            canSubmit
-              ? 'bg-parkway-tangerine01 text-white shadow-[0_8px_20px_-8px_rgba(249,149,107,0.6)] hover:brightness-105'
-              : 'bg-[#FEF5F1] text-parkway-grey03'
-          }`}
+          onClick={() => onPreview('transfer')}
+          className="h-9 rounded-[8px] bg-parkway-tangerine01 text-white font-semibold text-[12px] active:scale-[0.97] transition-transform"
         >
-          {submitted ? 'Sent ✓' : 'Confirm'}
+          Preview transfer
         </button>
-
-        {/* Confirmation flash */}
-        {submitted && (
-          <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center animate-[fadeIn_0.2s_ease-out]"
-            onClick={() => setSubmitted(false)}
-          >
-            <div className="bg-white rounded-2xl px-6 py-5 w-[280px] text-center shadow-xl animate-[popIn_0.25s_cubic-bezier(.2,.9,.3,1.2)]">
-              <div className="mx-auto mb-3 size-14 rounded-full bg-parkway-tangerine01/15 flex items-center justify-center">
-                <svg viewBox="0 0 24 24" className="size-7 text-parkway-tangerine01" fill="none">
-                  <path d="M5 12.5l4 4 10-10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-              <p className="font-display font-semibold text-[18px] text-parkway-grey10">
-                Transfer confirmed
-              </p>
-              <p className="font-manrope text-[12px] text-[#979797] mt-1">
-                ₦{displayAmount} sent to Adetula Mabel
-              </p>
-              <button
-                className="mt-4 w-full h-10 rounded-lg bg-parkway-tangerine01 text-white font-manrope font-semibold text-[13px]"
-                onClick={() => setSubmitted(false)}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => onPreview('invoice')}
+          className="h-9 rounded-[8px] bg-parkway-grey05 text-parkway-grey10 font-semibold text-[12px] active:scale-[0.97] transition-transform"
+        >
+          Preview invoice
+        </button>
       </div>
-
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes popIn {
-          0% { transform: scale(.9); opacity: 0 }
-          100% { transform: scale(1); opacity: 1 }
-        }
-        @keyframes amountShake {
-          0%   { transform: translate3d(0,0,0); }
-          10%  { transform: translate3d(-8px,0,0); }
-          25%  { transform: translate3d(7px,0,0); }
-          40%  { transform: translate3d(-6px,0,0); }
-          55%  { transform: translate3d(4px,0,0); }
-          70%  { transform: translate3d(-3px,0,0); }
-          85%  { transform: translate3d(2px,0,0); }
-          100% { transform: translate3d(0,0,0); }
-        }
-        .animate-amount-shake {
-          animation: amountShake 520ms cubic-bezier(.36,.07,.19,.97) both;
-          will-change: transform;
-        }
-        @keyframes errorFadeIn {
-          0%   { opacity: 0; transform: translateY(-4px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-        .animate-error-fade-in {
-          animation: errorFadeIn 220ms ease-out both;
-        }
-      `}</style>
     </div>
   )
 }
