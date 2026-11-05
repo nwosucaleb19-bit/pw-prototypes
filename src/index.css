@@ -2,6 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── PP Right Gothic (Wide), served with the app ────────────────
+   Bundled so every device renders the brand face, not a fallback.
+   `block` hides text briefly rather than flashing another font. */
+@font-face {
+  font-family: 'PP Right Gothic';
+  src: url('/fonts/PPRightGothic-WideRegular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'PP Right Gothic';
+  src: url('/fonts/PPRightGothic-WideMedium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'PP Right Gothic';
+  src: url('/fonts/PPRightGothic-WideDark.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'PP Right Gothic';
+  src: url('/fonts/PPRightGothic-WideBold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   color-scheme: light;
   font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;

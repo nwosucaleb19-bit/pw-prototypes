@@ -22,9 +22,9 @@ import { INVOICES, type Invoice } from './data/invoices'
 import type { Outcome } from './components/OutcomeMark'
 import Welcome from './screens/onboarding/Welcome'
 import PhoneNumber from './screens/onboarding/PhoneNumber'
-import VerifyOtp, { OTP_REJECT } from './screens/onboarding/VerifyOtp'
+import VerifyOtp from './screens/onboarding/VerifyOtp'
 import IdentityChoice, { type IdMethod } from './screens/onboarding/IdentityChoice'
-import IdentityVerification, { DEMO_IDENTITY, ID_NOT_FOUND_PREFIX, type IdentityRecord } from './screens/onboarding/IdentityVerification'
+import IdentityVerification, { DEMO_IDENTITY, type IdentityRecord } from './screens/onboarding/IdentityVerification'
 import AddressDetails, { type Address } from './screens/onboarding/AddressDetails'
 import ResumeSignup from './screens/onboarding/ResumeSignup'
 import { OnboardingProgressContext } from './onboarding/StepList'
@@ -32,6 +32,10 @@ import { SimulationContext, type Simulation } from './onboarding/network'
 import FaceVerification from './screens/onboarding/FaceVerification'
 import CreatePassword from './screens/onboarding/CreatePassword'
 import SetPin from './screens/onboarding/SetPin'
+import PasscodePrompt from './screens/passcode/PasscodePrompt'
+import PasscodeEntry from './screens/passcode/PasscodeEntry'
+import PasscodeLogin from './screens/login/PasscodeLogin'
+import PasswordLogin from './screens/login/PasswordLogin'
 
 type Screen =
   | 'home' | 'transfer'
@@ -41,13 +45,22 @@ type Screen =
   | 'success'
   // Onboarding
   | 'welcome' | 'obPhone' | 'obOtp' | 'obIdChoice' | 'obIdVerify' | 'obAddress' | 'obFace' | 'obPassword' | 'obPin' | 'obPinConfirm' | 'obResume'
+  // Passcode setup, offered on the dashboard right after onboarding
+  | 'passcodePrompt' | 'passcodeNew' | 'passcodeConfirm'
+  // Returning user: passcode login, and the password login after logging out
+  | 'login' | 'loginPassword'
 
 /** Chrome colours around the screen (status bar + home indicator) per screen. */
 const CHROME: Partial<Record<Screen, { top: string; bottom: string; dark?: boolean }>> = {
-  welcome: { top: '#F4F4F4', bottom: '#FFFFFF' },
+  welcome: { top: '#F5F5F5', bottom: '#FFFFFF' },
   obResume: { top: '#FFFFFF', bottom: '#FAFAFA' },
   obFace: { top: '#525252', bottom: '#525252', dark: true },
   home: { top: '#FAFAFA', bottom: '#FFFFFF' },
+  passcodePrompt: { top: '#FFFFFF', bottom: '#FFFFFF' },
+  passcodeNew: { top: '#FBFBFB', bottom: '#FBFBFB' },
+  passcodeConfirm: { top: '#FBFBFB', bottom: '#FBFBFB' },
+  login: { top: '#FBFBFB', bottom: '#FBFBFB' },
+  loginPassword: { top: '#FFFFFF', bottom: '#FBFBFB' },
 }
 const DEFAULT_CHROME = { top: '#FAFAFA', bottom: '#FAFAFA', dark: false }
 
@@ -65,6 +78,9 @@ const ONBOARDING_ORDER: { screen: Screen; label: string }[] = [
 ]
 
 const DEMO_PHONE = '08123456698'
+
+/** The returning user on the passcode login screen. */
+const LOGIN_USER = { firstName: 'Caleb', maskedPhone: '0801 *** **67', passcode: '135790' }
 
 /** Which onboarding step each screen belongs to. */
 const STEP_OF: Partial<Record<Screen, number>> = {
@@ -101,6 +117,9 @@ function initialStack(): Screen[] {
   try {
     const p = new URLSearchParams(window.location.search)
     if (p.get('start') === 'home' || p.get('preview')) return ['home']
+    // Review shortcut: the passcode prompt over the dashboard.
+    if (p.get('start') === 'passcode') return ['home', 'passcodePrompt']
+    if (p.get('start') === 'login') return ['login']
   } catch {
     /* ignore */
   }
@@ -171,11 +190,11 @@ export default function App() {
   const [pendingTxn, setPendingTxn] = useState<PendingTxn | null>(null)
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [successData, setSuccessData] = useState<SuccessData | null>(null)
-  const [variant, setVariant] = useState<SuccessVariant>(initialVariant)
+  const [variant] = useState<SuccessVariant>(initialVariant)
   // Where the last transfer ended up; drives which result screen shows.
   const [outcome, setOutcome] = useState<Outcome>('success')
   // Outcome used by the side panel's preview buttons.
-  const [previewOutcome, setPreviewOutcome] = useState<Outcome>(initialOutcome)
+  const [previewOutcome] = useState<Outcome>(initialOutcome)
   const [recentsScope, setRecentsScope] = useState<'bank' | 'parkway'>('bank')
   const [direction, setDirection] = useState<Direction>('forward')
   const [phone, setPhone] = useState(SAVED?.phone ?? DEMO_PHONE)
@@ -184,8 +203,11 @@ export default function App() {
   const [savedStep, setSavedStep] = useState(SAVED?.step ?? 0)
   // Set while the "already have an account" sheet is up, so nothing is saved for resume.
   const [existingAccount, setExistingAccount] = useState(false)
-  const [sim, setSim] = useState<Simulation>({ offline: false, faceFails: false })
+  const [sim] = useState<Simulation>({ offline: false, faceFails: false })
   const [newPin, setNewPin] = useState('2580')
+  // Set when onboarding finishes; the passcode prompt follows on the dashboard.
+  const [passcodeDue, setPasscodeDue] = useState(false)
+  const [newPasscode, setNewPasscode] = useState('')
   const [idRecord, setIdRecord] = useState<IdentityRecord>(SAVED?.idRecord ?? DEMO_IDENTITY)
   const hasNavigated = useRef(false)
   const current = stack[stack.length - 1]
@@ -206,6 +228,17 @@ export default function App() {
 
   const push = useCallback((screen: Screen) => navigate('forward', (s) => [...s, screen]), [navigate])
   const present = useCallback((screen: Screen) => navigate('present', (s) => [...s, screen]), [navigate])
+
+  // After onboarding, the passcode prompt rises over the dashboard 1.5s in.
+  // Leaving the dashboard first cancels the timer; it runs again on return.
+  useEffect(() => {
+    if (!passcodeDue || current !== 'home') return
+    const t = window.setTimeout(() => {
+      setPasscodeDue(false)
+      present('passcodePrompt')
+    }, 1500)
+    return () => window.clearTimeout(t)
+  }, [passcodeDue, current, present])
   const pop = useCallback(
     () => navigate('back', (s) => (s.length > 1 ? s.slice(0, -1) : s)),
     [navigate],
@@ -216,12 +249,6 @@ export default function App() {
     setRecipient(null)
     setPendingTxn(null)
     setInvoice(null)
-  }, [navigate])
-
-  const sendAgain = useCallback(() => {
-    // Back to the amount step with the same recipient.
-    navigate('dismiss', () => ['home', 'transfer', 'send'])
-    setPendingTxn(null)
   }, [navigate])
 
   const handleProceedToPin = useCallback(
@@ -335,14 +362,6 @@ export default function App() {
     navigate('forward', () => ['welcome', 'obIdChoice'])
   }
 
-  // Prototype panel: pretend the user left during liveness and came back.
-  const simulateReturn = () => {
-    setSavedStep(4)
-    setAddress({ street: '12 Admiralty Way', state: 'Lagos', lga: 'Eti-Osa', city: 'Lekki' })
-    saveProgress({ step: 4, phone, idMethod, idRecord, address: { street: '12 Admiralty Way', state: 'Lagos', lga: 'Eti-Osa', city: 'Lekki' } })
-    navigate('dismiss', () => ['welcome', 'obResume'])
-  }
-
   const renderScreen = (screen: Screen): ReactNode => {
     switch (screen) {
       case 'welcome':
@@ -403,7 +422,31 @@ export default function App() {
         return <SetPin key="set" mode="set" onDone={(p) => { setNewPin(p); push('obPinConfirm') }} />
       case 'obPinConfirm':
         // Account is ready: the wallet rises in like a result page.
-        return <SetPin key="confirm" mode="confirm" expected={newPin} onBack={pop} onDone={() => { clearProgress(); navigate('present', () => ['home']) }} />
+        return <SetPin key="confirm" mode="confirm" expected={newPin} onBack={pop} onDone={() => { clearProgress(); setPasscodeDue(true); navigate('present', () => ['home']) }} />
+      case 'passcodePrompt':
+        return <PasscodePrompt onSetPasscode={() => push('passcodeNew')} />
+      case 'passcodeNew':
+        return <PasscodeEntry mode="new" onComplete={(code) => { setNewPasscode(code); push('passcodeConfirm') }} />
+      case 'login':
+        return (
+          <PasscodeLogin
+            firstName={LOGIN_USER.firstName}
+            maskedPhone={LOGIN_USER.maskedPhone}
+            passcode={newPasscode || LOGIN_USER.passcode}
+            onSuccess={() => navigate('present', () => ['home'])}
+            onLogout={() => navigate('forward', () => ['loginPassword'])}
+            onLockedGoBack={() => navigate('forward', () => ['loginPassword'])}
+          />
+        )
+      case 'loginPassword':
+        return (
+          <PasswordLogin
+            onLogin={() => navigate('present', () => ['home'])}
+            onCreateAccount={() => { clearProgress(); navigate('forward', () => ['welcome', 'obPhone']) }}
+          />
+        )
+      case 'passcodeConfirm':
+        return <PasscodeEntry mode="confirm" expected={newPasscode} onBack={pop} onDone={() => navigate('dismiss', () => ['home'])} />
       case 'home':
         return <Home onOpenTransfer={() => push('transfer')} />
       case 'transfer':
@@ -464,12 +507,19 @@ export default function App() {
             variant={variant}
             outcome={outcome}
             onDone={finish}
-            onSendAgain={successData.kind === 'transfer' && recipient ? sendAgain : undefined}
             onTryAgain={tryAgain}
           />
         ) : null
     }
   }
+
+  const flow: Flow = current === 'login' || current === 'loginPassword'
+    ? 'login'
+    : current.startsWith('passcode')
+    ? 'passcode'
+    : current === 'welcome' || current === 'obResume' || ONBOARDING_ORDER.some((o) => o.screen === current)
+      ? 'onboarding'
+      : 'transfer'
 
   const screenKey = `${current}-${stack.length}`
   const currentEl = renderScreen(current)
@@ -506,14 +556,15 @@ export default function App() {
 
   return (
     <div className="h-screen w-full flex items-center justify-center overflow-hidden no-tap-highlight p-4">
-      <OnboardingPanel current={current} sim={sim} onSim={setSim} onJump={jumpTo} onSimulateReturn={simulateReturn} onStartOver={() => { clearProgress(); navigate('dismiss', () => ['welcome']) }} />
-      <VariantPanel
-        variant={variant}
-        onVariant={setVariant}
-        outcome={previewOutcome}
-        onOutcome={setPreviewOutcome}
-        onPreview={(kind) => previewSuccess(kind)}
-        onSuccessScreen={current === 'success'}
+      <FlowMenu
+        active={flow}
+        onSelect={(f) => {
+          if (f === flow) return
+          if (f === 'onboarding') navigate('dismiss', () => ['welcome'])
+          else if (f === 'passcode') navigate('present', () => ['home', 'passcodePrompt'])
+          else if (f === 'login') navigate('dismiss', () => ['login'])
+          else finish()
+        }}
       />
       <div
         style={{
@@ -571,14 +622,18 @@ export default function App() {
   )
 }
 
-/**
- * Prototype-only control, outside the phone: pick a success-screen variant
- * and jump straight to it without walking the whole flow.
- */
-const OUTCOMES: { id: Outcome; label: string; pin: string }[] = [
-  { id: 'success', label: 'Success', pin: '0000' },
-  { id: 'pending', label: 'Pending', pin: '1111' },
-  { id: 'failed', label: 'Failed', pin: '2222' },
+/* ────────────────────────────────────────────────────────────
+   Prototype controls (outside the phone)
+   A dropdown of flows. Picking one jumps to the start of that flow.
+   ──────────────────────────────────────────────────────────── */
+
+type Flow = 'onboarding' | 'transfer' | 'passcode' | 'login'
+
+const FLOWS: { id: Flow; label: string; hint: string }[] = [
+  { id: 'onboarding', label: 'Onboarding', hint: 'Sign-up, from Welcome' },
+  { id: 'transfer', label: 'Transfer', hint: 'Send money, from Home' },
+  { id: 'passcode', label: 'Passcode', hint: 'Set up a passcode' },
+  { id: 'login', label: 'Login', hint: 'Passcode 135790, or the one you set' },
 ]
 
 function initialOutcome(): Outcome {
@@ -591,190 +646,96 @@ function initialOutcome(): Outcome {
   return 'success'
 }
 
-function VariantPanel({
-  variant,
-  onVariant,
-  outcome,
-  onOutcome,
-  onPreview,
-  onSuccessScreen,
-}: {
-  variant: SuccessVariant
-  onVariant: (v: SuccessVariant) => void
-  outcome: Outcome
-  onOutcome: (o: Outcome) => void
-  onPreview: (kind: 'transfer' | 'invoice') => void
-  onSuccessScreen: boolean
-}) {
+function FlowMenu({ active, onSelect }: { active: Flow; onSelect: (f: Flow) => void }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const current = FLOWS.find((f) => f.id === active) ?? FLOWS[0]
+
+  // Close on a click outside or Escape.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
   return (
-    <div className="hidden min-[960px]:flex fixed left-6 top-1/2 -translate-y-1/2 w-[232px] flex-col gap-3 rounded-[18px] bg-white/90 backdrop-blur p-4 shadow-[0_20px_50px_-24px_rgba(0,0,0,0.25)] border border-black/5 font-manrope">
-      <div>
-        <p className="font-bold text-[13px] text-parkway-grey10">Success screen</p>
-        <p className="mt-0.5 font-medium text-[11px] leading-[1.4] text-parkway-grey02">
-          {onSuccessScreen ? 'Switching replays the page.' : 'Applies to transfers and invoices.'}
-        </p>
-      </div>
-      <div className="flex flex-col gap-1" role="radiogroup" aria-label="Success screen variant">
-        {SUCCESS_VARIANTS.map((v) => {
-          const on = v.id === variant
-          return (
-            <button
-              key={v.id}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              onClick={() => onVariant(v.id)}
-              className="text-left rounded-[10px] px-3 py-2 transition-colors"
-              style={{ background: on ? '#FEF5F1' : 'transparent' }}
-            >
-              <span className="flex items-center gap-2">
-                <span
-                  className="size-3.5 rounded-full border-2 flex items-center justify-center transition-colors"
-                  style={{ borderColor: on ? '#F9956B' : '#C6C6C6' }}
-                >
-                  <span
-                    className="size-1.5 rounded-full bg-parkway-tangerine01 transition-transform duration-200"
-                    style={{ transform: on ? 'scale(1)' : 'scale(0)' }}
-                  />
-                </span>
-                <span className="font-bold text-[13px] text-parkway-grey10">{v.label}</span>
-              </span>
-              <span className="mt-0.5 block pl-[22px] font-medium text-[11px] leading-[1.4] text-parkway-grey02">
-                {v.hint}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-      <div className="flex flex-col gap-1.5 pt-1">
-        <p className="font-bold text-[13px] text-parkway-grey10">Outcome</p>
-        <div className="grid grid-cols-3 gap-1 rounded-[10px] bg-parkway-grey06 p-1" role="radiogroup" aria-label="Preview outcome">
-          {OUTCOMES.map((o) => {
-            const on = o.id === outcome
+    <div ref={rootRef} className="hidden min-[960px]:flex fixed left-6 top-1/2 -translate-y-1/2 w-[232px] flex-col gap-2 font-manrope">
+      <p className="pl-1 font-bold text-[11px] uppercase tracking-[0.06em] text-parkway-grey02">Flow</p>
+      <div className="relative">
+        <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="w-full h-11 pl-3.5 pr-3 rounded-[12px] bg-white/90 backdrop-blur border border-black/5 shadow-[0_12px_32px_-18px_rgba(0,0,0,0.25)] flex items-center justify-between gap-2 active:scale-[0.99] transition-transform"
+        >
+          <span className="font-bold text-[13px] text-parkway-grey10">{current.label}</span>
+          <svg
+            viewBox="0 0 16 16"
+            className="size-4 text-parkway-grey02"
+            fill="none"
+            aria-hidden
+            style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 260ms var(--ease-travel)' }}
+          >
+            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
+        {/* The list stays mounted and drops from the button's edge. */}
+        <div
+          role="listbox"
+          aria-label="Prototype flow"
+          inert={!open}
+          className="absolute left-0 right-0 top-[calc(100%+6px)] z-10 rounded-[12px] bg-white border border-black/5 shadow-[0_18px_40px_-16px_rgba(0,0,0,0.28)] p-1"
+          style={{
+            opacity: open ? 1 : 0,
+            transform: open ? 'none' : 'translate3d(0,-6px,0) scale(0.98)',
+            transformOrigin: 'top center',
+            pointerEvents: open ? 'auto' : 'none',
+            transition: 'opacity 180ms ease, transform 260ms var(--ease-arrive)',
+          }}
+        >
+          {FLOWS.map((f) => {
+            const on = f.id === active
             return (
               <button
-                key={o.id}
+                key={f.id}
                 type="button"
-                role="radio"
-                aria-checked={on}
-                onClick={() => onOutcome(o.id)}
-                className="h-7 rounded-[7px] font-semibold text-[12px] transition-colors"
-                style={{ background: on ? '#fff' : 'transparent', color: on ? '#1F1F1F' : '#999', boxShadow: on ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}
+                role="option"
+                aria-selected={on}
+                onClick={() => {
+                  setOpen(false)
+                  onSelect(f.id)
+                }}
+                className="w-full rounded-[9px] px-3 py-2 flex items-center justify-between gap-3 text-left hover:bg-parkway-grey06 transition-colors"
+                style={{ background: on ? '#FEF5F1' : undefined }}
               >
-                {o.label}
+                <span className="flex flex-col">
+                  <span className="font-bold text-[13px] leading-[1.35]" style={{ color: on ? '#C77756' : '#1F1F1F' }}>
+                    {f.label}
+                  </span>
+                  <span className="font-medium text-[11px] leading-[1.4] text-parkway-grey02">{f.hint}</span>
+                </span>
+                {on && (
+                  <svg viewBox="0 0 16 16" className="size-4 shrink-0 text-[#C77756]" fill="none" aria-hidden>
+                    <path d="M3.5 8.5l3 3 6-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
               </button>
             )
           })}
         </div>
-        <p className="font-medium text-[11px] leading-[1.4] text-parkway-grey02">
-          In the flow, PIN {OUTCOMES.map((o) => `${o.pin} ${o.label.toLowerCase()}`).join(', ')}.
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-2 pt-1">
-        <button
-          type="button"
-          onClick={() => onPreview('transfer')}
-          className="h-9 rounded-[8px] bg-parkway-tangerine01 text-white font-semibold text-[12px] active:scale-[0.97] transition-transform"
-        >
-          Preview transfer
-        </button>
-        <button
-          type="button"
-          onClick={() => onPreview('invoice')}
-          className="h-9 rounded-[8px] bg-parkway-grey05 text-parkway-grey10 font-semibold text-[12px] active:scale-[0.97] transition-transform"
-        >
-          Preview invoice
-        </button>
       </div>
     </div>
-  )
-}
-
-/** Prototype-only control on the right: jump between onboarding screens. */
-function OnboardingPanel({
-  current,
-  sim,
-  onSim,
-  onJump,
-  onSimulateReturn,
-  onStartOver,
-}: {
-  current: Screen
-  sim: Simulation
-  onSim: (s: Simulation) => void
-  onJump: (s: Screen) => void
-  onSimulateReturn: () => void
-  onStartOver: () => void
-}) {
-  return (
-    <div className="hidden min-[1200px]:flex fixed right-6 top-1/2 -translate-y-1/2 w-[232px] max-h-[calc(100vh-32px)] overflow-y-auto hide-scrollbar flex-col gap-3 rounded-[18px] bg-white/90 backdrop-blur p-4 shadow-[0_20px_50px_-24px_rgba(0,0,0,0.25)] border border-black/5 font-manrope">
-      <div>
-        <p className="font-bold text-[13px] text-parkway-grey10">Onboarding</p>
-        <p className="mt-0.5 font-medium text-[11px] leading-[1.4] text-parkway-grey02">Jump to any screen.</p>
-      </div>
-      <div className="flex flex-col gap-0.5">
-        {ONBOARDING_ORDER.map((o) => {
-          const on = o.screen === current
-          return (
-            <button
-              key={o.screen}
-              type="button"
-              onClick={() => onJump(o.screen)}
-              className="text-left rounded-[10px] px-3 py-2 font-semibold text-[12px] transition-colors"
-              style={{ background: on ? '#FEF5F1' : 'transparent', color: on ? '#C77756' : '#1F1F1F' }}
-            >
-              {o.label}
-            </button>
-          )
-        })}
-      </div>
-      <div className="rounded-[10px] bg-parkway-grey06 p-3 font-medium text-[11px] leading-[1.5] text-parkway-grey09 space-y-1">
-        <p className="font-bold text-parkway-grey10">Test inputs</p>
-        <p>Code <b>{OTP_REJECT}</b> is rejected; any other code works.</p>
-        <p>A phone ending <b>0000</b> (e.g. 0803 000 0000) already has an account.</p>
-        <p>A BVN/NIN starting <b>{ID_NOT_FOUND_PREFIX}</b> has no record.</p>
-        <p>Face check uses your camera, or simulates one if blocked.</p>
-        <p>Easy PINs (1234, 0000…) are refused. Jumping to Confirm PIN expects <b>2580</b>.</p>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Toggle label="Simulate offline" on={sim.offline} onChange={(v) => onSim({ ...sim, offline: v })} />
-        <Toggle label="Face check fails" on={sim.faceFails} onChange={(v) => onSim({ ...sim, faceFails: v })} />
-      </div>
-      <button
-        type="button"
-        onClick={onSimulateReturn}
-        className="h-9 rounded-[8px] font-semibold text-[12px] active:scale-[0.97] transition-[transform,background-color]"
-        style={{ background: current === 'obResume' ? '#FEF5F1' : '#FFF', color: '#C77756', border: '1px solid #FDD5C4' }}
-      >
-        Returning user (resume)
-      </button>
-      <button
-        type="button"
-        onClick={onStartOver}
-        className="h-9 rounded-[8px] bg-parkway-grey05 text-parkway-grey10 font-semibold text-[12px] active:scale-[0.97] transition-transform"
-      >
-        Start over
-      </button>
-    </div>
-  )
-}
-
-function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      onClick={() => onChange(!on)}
-      className="flex items-center justify-between rounded-[10px] px-3 py-2 hover:bg-parkway-grey06 transition-colors"
-    >
-      <span className="font-semibold text-[12px] text-parkway-grey10">{label}</span>
-      <span className="relative h-5 w-9 rounded-full transition-colors duration-200" style={{ background: on ? '#F9956B' : '#DDDDDD' }}>
-        <span
-          className="absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform duration-200"
-          style={{ transform: on ? 'translateX(16px)' : 'none' }}
-        />
-      </span>
-    </button>
   )
 }

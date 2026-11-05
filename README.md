@@ -37,7 +37,10 @@ Welcome → Phone number → Verify code (step 1) → BVN / NIN choice → BVN o
 - Face verification: a tips sheet, then three prompts (come closer, closer again, smile), then a success sheet. It uses the device camera, or simulates the scan if no camera is available.
 - Create password: a strength meter and rule checklist appear as you type, plus a match tick on confirm.
 - PIN: easy PINs are refused. A mismatch on confirm shakes and clears.
-- A panel on wide screens jumps to any screen and lists the test inputs: OTP `0000` is rejected, and a BVN/NIN starting `000` has no record.
+- Passcode: 1.5s after onboarding lands on the dashboard, a "Secure your Wallet" prompt rises over it. Its keycap illustration presses keys at random. **Set Passcode** → enter 6 digits → confirm them (a mismatch shakes and clears) → "Your Passcode has been created!" → **Go to Dashboard**. Open `?start=passcode` to jump straight to the prompt.
+- Login (returning user): "Hi, Caleb" with a 6-digit passcode, `135790` (or the passcode set in the Passcode flow). Each wrong try counts down "N attempts left"; at 2 left Face ID is withdrawn; the 5th wrong try locks the account (lock sheet → **Go Back** to the password login). Face ID shows the scan panel, then logs in. **Not you? Log out** opens the phone/email + password login. Open `?start=login` to jump straight there.
+- On wide screens, a **Flow** dropdown beside the phone jumps to the start of Onboarding, Transfer, Passcode or Login.
+- Test inputs: OTP `0000` is rejected, and a BVN/NIN starting `000` has no record. In the transfer flow, PIN `0000` succeeds, `1111` stays pending and `2222` fails.
 
 ### Resume signup
 Progress is saved on the device as the user moves through onboarding. Reopening the app mid-signup lands on **Glad to have you back!**, which shows the steps as done, current or locked. Review re-opens the BVN/NIN details, Edit opens a pre-filled address form, and Continue jumps to the current step. Start Again asks first, then clears the identity and address details and restarts from BVN/NIN. The phone stays verified. Finishing the PIN step, or tapping Create Account on Welcome, clears saved progress. On wide screens, the panel's **Returning user (resume)** button simulates someone who left at Liveness.

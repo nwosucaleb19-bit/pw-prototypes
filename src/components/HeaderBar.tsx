@@ -27,7 +27,7 @@ export default function HeaderBar({ title, onBack, titleSize = 20 }: Props) {
         </button>
       )}
       <h1
-        className="absolute left-1/2 -translate-x-1/2 top-[44px] font-display font-semibold leading-[1.52] text-parkway-grey10 tracking-tightish whitespace-nowrap"
+        className="absolute left-1/2 -translate-x-1/2 top-[44px] font-display font-medium leading-[1.52] text-parkway-grey10 tracking-tightish whitespace-nowrap"
         style={{ fontSize: titleSize }}
       >
         {title}

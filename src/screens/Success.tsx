@@ -172,11 +172,10 @@ type Props = {
   /** Where the transfer ended up. Pending and failed always use the receipt layout. */
   outcome?: Outcome
   onDone: () => void
-  onSendAgain?: () => void
   onTryAgain?: () => void
 }
 
-export default function Success({ data, variant, outcome = 'success', onDone, onSendAgain, onTryAgain }: Props) {
+export default function Success({ data, variant, outcome = 'success', onDone, onTryAgain }: Props) {
   const toast = useToast()
   const page =
     variant === 'receipt' || outcome !== 'success' ? (
@@ -184,7 +183,6 @@ export default function Success({ data, variant, outcome = 'success', onDone, on
         data={data}
         outcome={outcome}
         onDone={onDone}
-        onSendAgain={onSendAgain}
         onTryAgain={onTryAgain}
         toast={toast.show}
       />
@@ -214,14 +212,12 @@ function ReceiptOutcome({
   data,
   outcome,
   onDone,
-  onSendAgain,
   onTryAgain,
   toast,
 }: {
   data: SuccessData
   outcome: Outcome
   onDone: () => void
-  onSendAgain?: () => void
   onTryAgain?: () => void
   toast: (msg: string) => void
 }) {
@@ -287,7 +283,6 @@ function ReceiptOutcome({
           <div className="rise-in mt-10 flex items-start justify-center gap-8" style={d(840)}>
             <RoundAction icon={OutcomeShare} label="Share" onClick={() => toast('Receipt ready to share')} />
             <RoundAction icon={OutcomeDownload} label="Download" onClick={() => toast('Receipt saved to Files')} />
-            {isSuccess && onSendAgain && <RoundAction icon={OutcomeRefresh} label="Send again" onClick={onSendAgain} />}
             {outcome === 'failed' && onTryAgain && (
               <RoundAction icon={OutcomeRefresh} label="Try again" onClick={onTryAgain} />
             )}

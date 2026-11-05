@@ -35,7 +35,7 @@ export default {
       fontFamily: {
         manrope: ['Manrope', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         jakarta: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        display: ['"PP Right Gothic"', '"Playfair Display"', 'ui-serif', 'Georgia', 'serif'],
+        display: ['"PP Right Gothic"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       boxShadow: {
         phone: '0 30px 60px -20px rgba(31, 31, 31, 0.25), 0 10px 25px -10px rgba(31,31,31,0.15)',
