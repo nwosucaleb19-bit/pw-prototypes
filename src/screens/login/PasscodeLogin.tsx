@@ -23,6 +23,8 @@ type Props = {
   passcode: string
   onSuccess: () => void
   onLogout: () => void
+  /** "Login with password" under the dots. */
+  onPasswordLogin: () => void
   /** "Go Back" on the locked sheet. */
   onLockedGoBack: () => void
 }
@@ -36,7 +38,7 @@ type FaceIdStage = 'idle' | 'scanning' | 'done'
  * sheet (36396:25572). Design coordinates include a 44px status bar, which
  * the prototype draws separately, so everything sits 44px higher here.
  */
-export default function PasscodeLogin({ firstName, maskedPhone, passcode, onSuccess, onLogout, onLockedGoBack }: Props) {
+export default function PasscodeLogin({ firstName, maskedPhone, passcode, onSuccess, onLogout, onPasswordLogin, onLockedGoBack }: Props) {
   const [code, setCode] = useState('')
   const [attemptsLeft, setAttemptsLeft] = useState(MAX_ATTEMPTS)
   const [error, setError] = useState<string | null>(null)
@@ -135,7 +137,7 @@ export default function PasscodeLogin({ firstName, maskedPhone, passcode, onSucc
         <p className="font-manrope font-medium text-[14px] tracking-[-0.56px] text-parkway-grey09">{maskedPhone}</p>
       </div>
 
-      {/* Dots, error, Forgot Passcode. The block rises as the error opens,
+      {/* Dots, error, Login with password. The block rises as the error opens,
           so the keypad only eases down a little, as in the design. */}
       <div
         className="py-8 flex flex-col items-center"
@@ -152,10 +154,11 @@ export default function PasscodeLogin({ firstName, maskedPhone, passcode, onSucc
         </Collapse>
         <button
           type="button"
-          onClick={() => toast.show('Passcode reset isn’t part of this prototype yet')}
+          onClick={onPasswordLogin}
+          disabled={busy}
           className="mt-6 font-manrope font-medium text-[12px] leading-normal tracking-[-0.24px] text-parkway-grey09 underline decoration-[5%] underline-offset-2 active:opacity-60"
         >
-          Forgot Passcode?
+          Login with password
         </button>
       </div>
 

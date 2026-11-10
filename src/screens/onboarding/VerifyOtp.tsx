@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import IconBackspace from '../../assets/figma/icon-backspace.svg'
 import BottomSheet from '../../components/BottomSheet'
 import { useOnlineGuard } from '../../onboarding/network'
@@ -10,6 +10,13 @@ type Props = {
   onVerified: () => void
   /** The verified number already has a wallet: no sign-up is in progress. */
   onExistingAccount?: () => void
+  /** Reuse outside sign-up (e.g. passcode reset): replaces the logo + stepper header. */
+  header?: ReactNode
+  title?: string
+  sub?: ReactNode
+  verifiedText?: string
+  /** Where a resent code goes, if not just the phone. */
+  sentTo?: string
 }
 
 /** Prototype rule: numbers ending 0000 already have a Parkway Wallet account. */
@@ -39,7 +46,7 @@ type Phase = 'entry' | 'verifying' | 'success' | 'error'
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'back']
 
-export default function VerifyOtp({ phone, onBack, onVerified, onExistingAccount }: Props) {
+export default function VerifyOtp({ phone, onBack, onVerified, onExistingAccount, header, title, sub, verifiedText, sentTo }: Props) {
   const [code, setCode] = useState('')
   const [phase, setPhase] = useState<Phase>('entry')
   const [left, setLeft] = useState(RESEND_AFTER_S - 1)
@@ -125,7 +132,7 @@ export default function VerifyOtp({ phone, onBack, onVerified, onExistingAccount
     setCode('')
     setPhase('entry')
     setCalling(false)
-    toast.show(`A new code was sent to ${phone}`)
+    toast.show(`A new code was sent to ${sentTo ?? phone}`)
   }
 
   const voiceCall = () => {
@@ -149,26 +156,28 @@ export default function VerifyOtp({ phone, onBack, onVerified, onExistingAccount
 
   const status =
     phase === 'verifying' ? { text: 'Verifying…', color: '#4B5563' }
-    : phase === 'success' ? { text: 'Phone number verified', color: '#1F9D55' }
+    : phase === 'success' ? { text: verifiedText ?? 'Phone number verified', color: '#1F9D55' }
     : phase === 'error' ? { text: 'Incorrect code. Try again.', color: '#FC5555' }
     : calling && phase === 'entry' ? { text: `Calling +234 ${phone} with your code…`, color: '#4B5563' }
     : null
 
   return (
     <div className="h-full w-full bg-parkway-bg flex flex-col relative overflow-hidden">
-      <OnboardingHeader step={1} onBack={onBack} />
+      {header ?? <OnboardingHeader step={1} onBack={onBack} />}
 
       <div className="flex-1 flex flex-col items-center px-5 pt-8">
         <ScreenTitle
           sub={
-            <>
-              Please enter the verification code sent to
-              <br />
-              +234 {phone}.
-            </>
+            sub ?? (
+              <>
+                Please enter the verification code sent to
+                <br />
+                +234 {phone}.
+              </>
+            )
           }
         >
-          Enter 4 digits code
+          {title ?? 'Enter 4 digits code'}
         </ScreenTitle>
 
         <div ref={boxesRef} className="mt-[23px] flex gap-[13px]">

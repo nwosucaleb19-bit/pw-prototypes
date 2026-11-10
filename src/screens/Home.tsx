@@ -17,14 +17,13 @@ import ArrowTiny from '../assets/figma/arrow-tiny.svg'
 import ArrowAcc from '../assets/figma/arrow-acc.svg'
 import IconCopy from '../assets/figma/icon-copy.svg'
 import IconEye from '../assets/figma/icon-eye.svg'
-import NavHome from '../assets/figma/nav-home.svg'
-import NavCards from '../assets/figma/nav-cards.svg'
-import NavBills from '../assets/figma/nav-bills.svg'
-import NavMore from '../assets/figma/nav-more.svg'
+import BottomNav from '../components/BottomNav'
 import BannerBankAccounts from '../assets/figma/banner-bank-accounts.png'
 
 type Props = {
   onOpenTransfer: () => void
+  /** The More tab in the bottom nav: settings. */
+  onOpenMore: () => void
 }
 
 type QuickAction = {
@@ -57,7 +56,7 @@ const QUICK_ACTIONS = [
   { label: 'Betting',   icon: IconBasketball, bg: '#FAFAFA', badge: null },
 ] as const
 
-export default function Home({ onOpenTransfer }: Props) {
+export default function Home({ onOpenTransfer, onOpenMore }: Props) {
   const actions: QuickAction[] = [
     { label: 'Loans',         icon: IconLoans,    bg: '#FEEAE1' },
     { label: 'Bank Accounts', icon: IconBank,     bg: '#FAF1D2' },
@@ -227,14 +226,7 @@ export default function Home({ onOpenTransfer }: Props) {
       </div>
 
       {/* Bottom nav — sticks to bottom of the phone screen */}
-      <nav className="shrink-0 h-[72px] bg-white border-t border-[#f5f5f5] flex items-center justify-around px-6"
-           style={{ boxShadow: '0 -4px 10px rgba(0,0,0,0.06)' }}
-      >
-        <NavItem icon={NavHome} label="Home" active />
-        <NavItem icon={NavCards} label="Cards" />
-        <NavItem icon={NavBills} label="Bills" />
-        <NavItem icon={NavMore} label="More" />
-      </nav>
+      <BottomNav active="home" onSelect={(t) => { if (t === 'more') onOpenMore() }} />
     </div>
   )
 }
@@ -275,20 +267,6 @@ function TxnRow({ tx }: { tx: Txn }) {
         </p>
       </div>
     </div>
-  )
-}
-
-function NavItem({ icon, label, active }: { icon: string; label: string; active?: boolean }) {
-  return (
-    <button type="button" className="flex flex-col items-center gap-[2px]">
-      <img src={icon} alt="" className="size-[22px]" style={{ opacity: active ? 1 : 0.6 }} />
-      <span
-        className="font-manrope font-semibold text-[10px] tracking-[-0.1px]"
-        style={{ color: active ? '#F9956B' : '#B3B3B3' }}
-      >
-        {label}
-      </span>
-    </button>
   )
 }
 

@@ -36,6 +36,10 @@ import PasscodePrompt from './screens/passcode/PasscodePrompt'
 import PasscodeEntry from './screens/passcode/PasscodeEntry'
 import PasscodeLogin from './screens/login/PasscodeLogin'
 import PasswordLogin from './screens/login/PasswordLogin'
+import More from './screens/settings/More'
+import Security from './screens/settings/Security'
+import ConfirmPassword from './screens/settings/ConfirmPassword'
+import { FlowHeader } from './components/settings/SettingsUI'
 
 type Screen =
   | 'home' | 'transfer'
@@ -49,6 +53,10 @@ type Screen =
   | 'passcodePrompt' | 'passcodeNew' | 'passcodeConfirm'
   // Returning user: passcode login, and the password login after logging out
   | 'login' | 'loginPassword'
+  // Settings: the More tab and its Security page
+  | 'more' | 'security'
+  // Security → Change Passcode, and its Forgot passcode? reset (code + password)
+  | 'changeCurrent' | 'changeNew' | 'changeConfirm' | 'changeOtp' | 'resetPassword'
 
 /** Chrome colours around the screen (status bar + home indicator) per screen. */
 const CHROME: Partial<Record<Screen, { top: string; bottom: string; dark?: boolean }>> = {
@@ -61,6 +69,11 @@ const CHROME: Partial<Record<Screen, { top: string; bottom: string; dark?: boole
   passcodeConfirm: { top: '#FBFBFB', bottom: '#FBFBFB' },
   login: { top: '#FBFBFB', bottom: '#FBFBFB' },
   loginPassword: { top: '#FFFFFF', bottom: '#FBFBFB' },
+  more: { top: '#FFFFFF', bottom: '#FFFFFF' },
+  security: { top: '#FFFFFF', bottom: '#FBFBFB' },
+  changeCurrent: { top: '#FBFBFB', bottom: '#FBFBFB' },
+  changeNew: { top: '#FBFBFB', bottom: '#FBFBFB' },
+  changeConfirm: { top: '#FBFBFB', bottom: '#FBFBFB' },
 }
 const DEFAULT_CHROME = { top: '#FAFAFA', bottom: '#FAFAFA', dark: false }
 
@@ -79,8 +92,17 @@ const ONBOARDING_ORDER: { screen: Screen; label: string }[] = [
 
 const DEMO_PHONE = '08123456698'
 
+/** Screens the Flow menu files under Settings. */
+const SETTINGS_SCREENS: Screen[] = ['more', 'security', 'changeCurrent', 'changeNew', 'changeConfirm', 'changeOtp', 'resetPassword']
+
 /** The returning user on the passcode login screen. */
-const LOGIN_USER = { firstName: 'Caleb', maskedPhone: '0801 *** **67', passcode: '135790' }
+const LOGIN_USER = {
+  firstName: 'Caleb',
+  maskedPhone: '0801 *** **67',
+  maskedEmail: 'ca****@gmail.com',
+  passcode: '135790',
+  password: 'Parkway@123',
+}
 
 /** Which onboarding step each screen belongs to. */
 const STEP_OF: Partial<Record<Screen, number>> = {
@@ -120,6 +142,7 @@ function initialStack(): Screen[] {
     // Review shortcut: the passcode prompt over the dashboard.
     if (p.get('start') === 'passcode') return ['home', 'passcodePrompt']
     if (p.get('start') === 'login') return ['login']
+    if (p.get('start') === 'settings') return ['more']
   } catch {
     /* ignore */
   }
@@ -131,8 +154,9 @@ function initialStack(): Screen[] {
  * forward / back: a UIKit push and pop.
  * present: the success page rises over the flow.
  * dismiss: the success page leaves and reveals where the user lands.
+ * tab: a bottom-nav switch; the new tab fades in over the old.
  */
-type Direction = 'forward' | 'back' | 'present' | 'dismiss'
+type Direction = 'forward' | 'back' | 'present' | 'dismiss' | 'tab'
 
 type PendingTxn = { amount: number; description: string }
 
@@ -208,6 +232,14 @@ export default function App() {
   // Set when onboarding finishes; the passcode prompt follows on the dashboard.
   const [passcodeDue, setPasscodeDue] = useState(false)
   const [newPasscode, setNewPasscode] = useState('')
+  // The account's passcode: what login and Change Passcode check against.
+  const [passcode, setPasscode] = useState(LOGIN_USER.passcode)
+  // Change Passcode: the new one awaiting confirmation, and whether the user
+  // got here by knowing the old one ('change') or via Forgot passcode? ('reset').
+  const [draftPasscode, setDraftPasscode] = useState('')
+  const [changeKind, setChangeKind] = useState<'change' | 'reset'>('change')
+  // Security → Face or Touch ID (off, as drawn in Figma).
+  const [faceIdOn, setFaceIdOn] = useState(false)
   const [idRecord, setIdRecord] = useState<IdentityRecord>(SAVED?.idRecord ?? DEMO_IDENTITY)
   const hasNavigated = useRef(false)
   const current = stack[stack.length - 1]
@@ -432,9 +464,10 @@ export default function App() {
           <PasscodeLogin
             firstName={LOGIN_USER.firstName}
             maskedPhone={LOGIN_USER.maskedPhone}
-            passcode={newPasscode || LOGIN_USER.passcode}
+            passcode={passcode}
             onSuccess={() => navigate('present', () => ['home'])}
             onLogout={() => navigate('forward', () => ['loginPassword'])}
+            onPasswordLogin={() => navigate('forward', () => ['loginPassword'])}
             onLockedGoBack={() => navigate('forward', () => ['loginPassword'])}
           />
         )
@@ -446,9 +479,87 @@ export default function App() {
           />
         )
       case 'passcodeConfirm':
-        return <PasscodeEntry mode="confirm" expected={newPasscode} onBack={pop} onDone={() => navigate('dismiss', () => ['home'])} />
+        return <PasscodeEntry mode="confirm" expected={newPasscode} onBack={pop} onDone={() => { setPasscode(newPasscode); navigate('dismiss', () => ['home']) }} />
       case 'home':
-        return <Home onOpenTransfer={() => push('transfer')} />
+        return <Home onOpenTransfer={() => push('transfer')} onOpenMore={() => navigate('tab', () => ['more'])} />
+      case 'more':
+        return (
+          <More
+            onSelectTab={(t) => { if (t === 'home') navigate('tab', () => ['home']) }}
+            onOpenSecurity={() => push('security')}
+            onLogout={() => navigate('dismiss', () => ['login'])}
+          />
+        )
+      case 'security':
+        return (
+          <Security
+            onBack={pop}
+            faceIdOn={faceIdOn}
+            onToggleFaceId={() => setFaceIdOn((v) => !v)}
+            onChangePasscode={() => { setChangeKind('change'); push('changeCurrent') }}
+          />
+        )
+      case 'changeCurrent':
+        return (
+          <PasscodeEntry
+            mode="current"
+            expected={passcode}
+            onBack={pop}
+            onVerified={() => push('changeOtp')}
+            onForgot={() => { setChangeKind('reset'); push('changeOtp') }}
+          />
+        )
+      // A one-time code to the phone and email, on both paths: after the
+      // current passcode (change), or as the first check of a reset.
+      case 'changeOtp':
+        return (
+          <VerifyOtp
+            phone={LOGIN_USER.maskedPhone}
+            onBack={pop}
+            onVerified={() => push(changeKind === 'reset' ? 'resetPassword' : 'changeNew')}
+            header={
+              changeKind === 'reset'
+                ? <FlowHeader title="Reset Passcode" onBack={pop} step={1} steps={2} />
+                : <FlowHeader title="Change Passcode" onBack={pop} />
+            }
+            title="Verify it’s you"
+            sub={<>Enter the 4-digit code we sent to<br />{LOGIN_USER.maskedPhone} and {LOGIN_USER.maskedEmail}.</>}
+            verifiedText="Code verified"
+            sentTo={`${LOGIN_USER.maskedPhone} and ${LOGIN_USER.maskedEmail}`}
+          />
+        )
+      case 'resetPassword':
+        return (
+          <ConfirmPassword
+            expected={LOGIN_USER.password}
+            onBack={pop}
+            onVerified={() => push('changeNew')}
+            onLockedOut={() => navigate('dismiss', () => ['loginPassword'])}
+          />
+        )
+      case 'changeNew':
+        return (
+          <PasscodeEntry
+            mode="new"
+            avoid={passcode}
+            subtitle="Choose 6 digits you haven’t used before"
+            onBack={pop}
+            onComplete={(code) => { setDraftPasscode(code); push('changeConfirm') }}
+          />
+        )
+      case 'changeConfirm':
+        return (
+          <PasscodeEntry
+            mode="confirm"
+            expected={draftPasscode}
+            subtitle="Enter your new passcode again"
+            onBack={pop}
+            doneTitle={changeKind === 'reset' ? 'Your Passcode has been reset!' : 'Your Passcode has been changed!'}
+            doneBody={`Use it the next time you open the app. We’ve sent a security alert to ${LOGIN_USER.maskedPhone} and your email.`}
+            doneLabel="Back to Security"
+            onDone={() => { setPasscode(draftPasscode); navigate('back', () => ['more', 'security']) }}
+          />
+        )
       case 'transfer':
         return (
           <Transfer
@@ -515,6 +626,8 @@ export default function App() {
 
   const flow: Flow = current === 'login' || current === 'loginPassword'
     ? 'login'
+    : SETTINGS_SCREENS.includes(current)
+    ? 'settings'
     : current.startsWith('passcode')
     ? 'passcode'
     : current === 'welcome' || current === 'obResume' || ONBOARDING_ORDER.some((o) => o.screen === current)
@@ -563,6 +676,7 @@ export default function App() {
           if (f === 'onboarding') navigate('dismiss', () => ['welcome'])
           else if (f === 'passcode') navigate('present', () => ['home', 'passcodePrompt'])
           else if (f === 'login') navigate('dismiss', () => ['login'])
+          else if (f === 'settings') navigate('tab', () => ['more'])
           else finish()
         }}
       />
@@ -627,13 +741,14 @@ export default function App() {
    A dropdown of flows. Picking one jumps to the start of that flow.
    ──────────────────────────────────────────────────────────── */
 
-type Flow = 'onboarding' | 'transfer' | 'passcode' | 'login'
+type Flow = 'onboarding' | 'transfer' | 'passcode' | 'login' | 'settings'
 
 const FLOWS: { id: Flow; label: string; hint: string }[] = [
   { id: 'onboarding', label: 'Onboarding', hint: 'Sign-up, from Welcome' },
   { id: 'transfer', label: 'Transfer', hint: 'Send money, from Home' },
   { id: 'passcode', label: 'Passcode', hint: 'Set up a passcode' },
   { id: 'login', label: 'Login', hint: 'Passcode 135790, or the one you set' },
+  { id: 'settings', label: 'Settings', hint: 'Change or reset passcode · password Parkway@123' },
 ]
 
 function initialOutcome(): Outcome {

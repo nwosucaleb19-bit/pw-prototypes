@@ -134,6 +134,14 @@ body {
 .enter-dismiss { z-index: 1; animation: dismissReveal 520ms var(--ease-arrive) both; }
 .leave-dismiss { z-index: 2; animation: dismissOut 360ms var(--ease-travel) both; }
 
+/* Bottom-nav tab switch: the new tab fades in over the old one, which holds
+   still underneath. The nav sits in the same place on both, so only its
+   active colour changes. */
+@keyframes tabIn   { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tabHold { from { opacity: 1; } to { opacity: 1; } }
+.enter-tab { z-index: 2; animation: tabIn 240ms var(--ease-arrive) both; }
+.leave-tab { z-index: 1; animation: tabHold 240ms linear both; }
+
 /* ── Soft arrivals ───────────────────────────────────────────
    The shared "soft ease fade": a short rise out of a light blur.
    Used for status rows, hints and anything that appears in place. */

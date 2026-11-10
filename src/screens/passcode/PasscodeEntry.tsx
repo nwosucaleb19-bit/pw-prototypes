@@ -5,9 +5,40 @@ import { PASSCODE_LENGTH as LENGTH, PasscodeDots, PasscodeKeypad, buzzError, sha
 import IconCheck from '../../assets/figma/passcode/check.svg'
 import BackArrow from '../../assets/figma/back-arrow.svg'
 
-type Props =
-  | { mode: 'new'; onComplete: (code: string) => void }
-  | { mode: 'confirm'; expected: string; onBack: () => void; onDone: () => void }
+type Common = {
+  title?: string
+  subtitle?: string
+  /** Shows the back button. */
+  onBack?: () => void
+}
+
+type Props = Common &
+  (
+    | {
+        mode: 'new'
+        onComplete: (code: string) => void
+        /** The passcode being replaced: the new one can't match it. */
+        avoid?: string
+      }
+    | {
+        mode: 'confirm'
+        expected: string
+        onDone: () => void
+        doneTitle?: string
+        doneBody?: string
+        doneLabel?: string
+      }
+    | {
+        /** Change Passcode, step 1: prove you know the current one. */
+        mode: 'current'
+        expected: string
+        onVerified: () => void
+        onForgot: () => void
+      }
+  )
+
+/** Wrong tries allowed on the current passcode before the keypad locks. */
+const CURRENT_TRIES = 5
 
 /**
  * Why a new passcode is too easy to guess, or null when it's fine.
@@ -21,10 +52,18 @@ export function weakPasscodeReason(code: string): string | null {
   return null
 }
 
+const DEFAULT_TITLE = { new: 'Enter New Passcode', confirm: 'Confirm Passcode', current: 'Enter Current Passcode' }
+const DEFAULT_SUBTITLE = {
+  new: 'Choose 6 digits to open the app',
+  confirm: 'Choose 6 digits to open the app',
+  current: 'Enter the 6 digits you use to open the app',
+}
+
 /**
  * Enter New Passcode (Figma 36385:24453) and Confirm Passcode (36385:24515),
  * the weak-passcode errors (36385:24621, 36395:25327) and the "created"
- * sheet (36385:24670) once the two match.
+ * sheet (36385:24670) once the two match. The same screen asks for the
+ * current passcode at the start of Change Passcode.
  */
 export default function PasscodeEntry(props: Props) {
   const [code, setCode] = useState('')
@@ -32,8 +71,10 @@ export default function PasscodeEntry(props: Props) {
   // The last message stays in the slot while it collapses away.
   const [shownError, setShownError] = useState('')
   const [created, setCreated] = useState(false)
+  const [misses, setMisses] = useState(0)
   const dotsRef = useRef<HTMLDivElement>(null)
-  const isConfirm = props.mode === 'confirm'
+  const { mode } = props
+  const locked = mode === 'current' && misses >= CURRENT_TRIES
 
   const fail = (message: string) => {
     setError(message)
@@ -49,9 +90,21 @@ export default function PasscodeEntry(props: Props) {
     if (code.length !== LENGTH) return
     const t = window.setTimeout(() => {
       if (props.mode === 'new') {
-        const reason = weakPasscodeReason(code)
+        const reason = props.avoid && code === props.avoid ? 'New passcode can’t be your current one' : weakPasscodeReason(code)
         if (reason) fail(reason)
         else props.onComplete(code)
+        return
+      }
+      if (props.mode === 'current') {
+        if (code === props.expected) return props.onVerified()
+        const n = misses + 1
+        setMisses(n)
+        const left = CURRENT_TRIES - n
+        fail(
+          left <= 0
+            ? 'Too many tries. Reset your passcode instead.'
+            : `Incorrect passcode. ${left} ${left === 1 ? 'attempt' : 'attempts'} left`,
+        )
         return
       }
       if (code === props.expected) setCreated(true)
@@ -63,7 +116,7 @@ export default function PasscodeEntry(props: Props) {
   }, [code])
 
   const press = (d: string) => {
-    if (code.length >= LENGTH || created) return
+    if (code.length >= LENGTH || created || locked) return
     // Typing again clears the error; the rings go back to orange.
     if (error) setError(null)
     setCode((c) => c + d)
@@ -71,12 +124,11 @@ export default function PasscodeEntry(props: Props) {
   const back = () => setCode((c) => c.slice(0, -1))
 
   // The delete key appears once a digit is in, and stays until the field is empty.
-  const showBackspace = code.length > 0 && !created
+  const showBackspace = code.length > 0 && !created && !locked
 
   return (
     <div className="relative h-full w-full bg-parkway-grey06 flex flex-col items-center">
-      {/* Back to Enter New Passcode, styled like the app's other back buttons. */}
-      {props.mode === 'confirm' && (
+      {props.onBack && (
         <button
           type="button"
           aria-label="Go back"
@@ -91,10 +143,10 @@ export default function PasscodeEntry(props: Props) {
       {/* Title */}
       <div className="mt-[74px] flex flex-col items-center gap-1.5 text-center rise-in">
         <h1 className="font-display font-medium text-[22px] leading-normal text-parkway-grey01 whitespace-nowrap">
-          {isConfirm ? 'Confirm Passcode' : 'Enter New Passcode'}
+          {props.title ?? DEFAULT_TITLE[mode]}
         </h1>
         <p className="font-manrope font-normal text-[14px] leading-normal tracking-[-0.14px] text-parkway-grey09">
-          Choose 6 digits to open the app
+          {props.subtitle ?? DEFAULT_SUBTITLE[mode]}
         </p>
       </div>
 
@@ -110,14 +162,28 @@ export default function PasscodeEntry(props: Props) {
             {shownError}
           </p>
         </Collapse>
+        {props.mode === 'current' && (
+          <button
+            type="button"
+            onClick={props.onForgot}
+            className="mt-6 font-manrope font-medium text-[12px] leading-normal tracking-[-0.24px] underline decoration-[5%] underline-offset-2 active:opacity-60 transition-colors duration-300"
+            // Once the tries run out, the way forward is the reset.
+            style={{ color: locked ? '#F9956B' : '#444444', fontWeight: locked ? 700 : 500 }}
+          >
+            Forgot passcode?
+          </button>
+        )}
       </div>
 
       {/* Keypad */}
-      <div className="mt-4 rise-in" style={{ ['--d' as string]: '80ms' }}>
-        <PasscodeKeypad onDigit={press} onBackspace={back} showBackspace={showBackspace} />
+      <div
+        className="mt-4 rise-in transition-opacity duration-300"
+        style={{ ['--d' as string]: '80ms', opacity: locked ? 0.4 : 1 }}
+      >
+        <PasscodeKeypad onDigit={press} onBackspace={back} showBackspace={showBackspace} disabled={locked} />
       </div>
 
-      {isConfirm && (
+      {props.mode === 'confirm' && (
         <BottomSheet
           open={created}
           onClose={() => {}}
@@ -129,15 +195,20 @@ export default function PasscodeEntry(props: Props) {
             <div className="flex flex-col items-center gap-1.5 pb-4">
               <CreatedMark />
               <p className="font-manrope font-bold text-[18px] leading-normal tracking-[-0.54px] text-[#1F2937] text-center">
-                Your Passcode has been created!
+                {props.doneTitle ?? 'Your Passcode has been created!'}
               </p>
+              {props.doneBody && (
+                <p className="max-w-[300px] font-manrope font-medium text-[12px] leading-[1.6] text-[#6B7280] text-center">
+                  {props.doneBody}
+                </p>
+              )}
             </div>
             <button
               type="button"
-              onClick={props.mode === 'confirm' ? props.onDone : undefined}
+              onClick={props.onDone}
               className="w-full h-12 rounded-[8px] bg-parkway-tangerine01 font-manrope font-semibold text-[14px] leading-[1.8] text-white active:scale-[0.98] transition-transform"
             >
-              Go to Dashboard
+              {props.doneLabel ?? 'Go to Dashboard'}
             </button>
           </div>
         </BottomSheet>
